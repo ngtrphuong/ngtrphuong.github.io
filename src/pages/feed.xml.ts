@@ -10,8 +10,8 @@ export async function GET(context: APIContext) {
   const SITE = context.site?.toString().replace(/\/$/, '') ?? 'https://ngtrphuong.github.io';
 
   return rss({
-    title: 'ngtrphuong Blog',
-    description: 'My Website where I blog',
+    title: 'Phuong Nguyen Blog',
+    description: 'Blog and tools by Phuong Nguyen (ngtrphuong)',
     site: SITE,
     items: posts.map(post => ({
       title: post.data.title,

@@ -53,7 +53,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/mathewsachin/mathewsachin-github-io-ci:latest
+      image: ghcr.io/ngtrphuong/ngtrphuong-github-io-ci:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -148,7 +148,7 @@ The image gets two tags:
   id: tags
   run: |
     DOCKERFILE_HASH=$(sha256sum ci/Dockerfile | cut -c1-12)
-    echo "tags=ghcr.io/mathewsachin/mathewsachin-github-io-ci:latest,ghcr.io/mathewsachin/mathewsachin-github-io-ci:df-${DOCKERFILE_HASH}" >> "$GITHUB_OUTPUT"
+    echo "tags=ghcr.io/ngtrphuong/ngtrphuong-github-io-ci:latest,ghcr.io/ngtrphuong/ngtrphuong-github-io-ci:df-${DOCKERFILE_HASH}" >> "$GITHUB_OUTPUT"
 ```
 
 - **`latest`** — what the build workflow always pulls. Points to the most recently built image.
@@ -163,7 +163,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/mathewsachin/mathewsachin-github-io-ci:latest
+      image: ghcr.io/ngtrphuong/ngtrphuong-github-io-ci:latest
 ```
 
 GitHub Actions pulls the container image, starts the job inside it, and every subsequent step runs inside that environment. The checkout, `npm ci`, `bundle install`, and `jekyll build` steps all run with Ruby, Node, and libvips already available.
@@ -217,7 +217,7 @@ GitHub Container Registry (GHCR) has a few advantages for this use case:
 
 - **No pull rate limits** for packages in public repos — Docker Hub imposes rate limits for unauthenticated pulls, and GitHub Actions runners share IPs, so you can hit those limits fast.
 - **Authentication via GITHUB_TOKEN** — no extra secrets to manage. The token is available in every workflow automatically.
-- **Co-located with the code** — the image lives at `ghcr.io/mathewsachin/...`, directly associated with the repository. Easy to find, easy to audit.
+- **Co-located with the code** — the image lives at `ghcr.io/ngtrphuong/...`, directly associated with the repository. Easy to find, easy to audit.
 
 For a private repository you'd need to add a `credentials:` block to the `container:` config, but for a public repo the image can be public too and no credentials are needed at pull time.
 
@@ -244,7 +244,7 @@ For this blog — Jekyll with `jekyll_picture_tag` requiring libvips — the 6-7
 | `ci/Dockerfile` | Defines the CI environment: Ubuntu 24.04, Node.js 20, Ruby 3.3.7 (compiled), libvips, Bundler |
 | `build-ci-image.yml` | Builds and pushes the image to GHCR on Dockerfile changes |
 | `build-site.yml` | Runs the actual site build inside the pre-baked container |
-| GHCR | Stores the image at `ghcr.io/mathewsachin/mathewsachin-github-io-ci` |
+| GHCR | Stores the image at `ghcr.io/ngtrphuong/ngtrphuong-github-io-ci` |
 | Dockerfile hash tag | Immutable content-addressed tag for debugging and pinning |
 
 The build is fast because the slow parts ran a long time ago, and the result is still sitting in a registry waiting to be pulled.

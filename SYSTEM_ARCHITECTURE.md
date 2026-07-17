@@ -6,7 +6,7 @@
 
 ## 1. What this application is
 
-A **personal website + blog + browser tools suite** for ngtrphuong.
+A **personal website + blog + browser tools suite** for Phuong Nguyen (`ngtrphuong`).
 
 | Fact | Value (from source / live site) |
 |------|----------------------------------|

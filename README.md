@@ -1,7 +1,7 @@
 
 # ngtrphuong.github.io
 
-Personal website and blog built with [Astro](https://astro.build/).
+Personal website and blog for **Phuong Nguyen** (`ngtrphuong`), built with [Astro](https://astro.build/).
 
 ## Contributor Notes
 

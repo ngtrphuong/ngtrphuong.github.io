@@ -32,7 +32,7 @@ const {
 
 const BASE = import.meta.env.BASE_URL;
 
-const pageTitle = title ? title : 'Blog | ngtrphuong';
+const pageTitle = title ? title : 'Blog | Phuong Nguyen';
 const resolvedCanonical = canonicalUrl || Astro.url.href;
 ---
 <!DOCTYPE html>
@@ -61,8 +61,8 @@ const resolvedCanonical = canonicalUrl || Astro.url.href;
   {manifest && <link rel="manifest" href={`${BASE}${manifest}`} />}
 
   {/* RSS Feed */}
-  {feedUrl && <link rel="alternate" type="application/rss+xml" title="ngtrphuong Blog" href={feedUrl} />}
-  {!feedUrl && <link rel="alternate" type="application/rss+xml" title="ngtrphuong Blog" href={`${BASE}feed.xml`} />}
+  {feedUrl && <link rel="alternate" type="application/rss+xml" title="Phuong Nguyen Blog" href={feedUrl} />}
+  {!feedUrl && <link rel="alternate" type="application/rss+xml" title="Phuong Nguyen Blog" href={`${BASE}feed.xml`} />}
 
   {accentColor && <style define:vars={{ accentColor }}>{`:root { --post-accent: ${accentColor}; }`}</style>}
 

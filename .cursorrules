@@ -1,4 +1,4 @@
-# MathewSachin.GitHub.io — Cursor rules pointer
+# ngtrphuong.github.io — Cursor rules pointer
 
 > **Executable project rules live in `.cursor/rules/*.mdc`** (Cursor Agent–compatible format).
 > Do not put long always-on instructions here; Agent mode may ignore legacy `.cursorrules`.
