@@ -15,7 +15,6 @@ import TableOfContents from '@components/TableOfContents.astro';
 import RelatedPosts from '@components/RelatedPosts.astro';
 import Share from '@components/Share.astro';
 import Giscus from '@components/Giscus.astro';
-import AdUnit from '@components/AdUnit.astro';
 import ReadingProgressBar from '@components/ReadingProgressBar.astro';
 import { formatDate, getPostDate, estimateReadingTime, postIdFromSlug, tagSlug } from '@utils/posts';
 import '@styles/blog.css';
@@ -33,9 +32,9 @@ interface Props {
 
 const { post, allPosts, headings, canonicalPath } = Astro.props;
 const BASE = import.meta.env.BASE_URL;
-const SITE = import.meta.env.SITE || 'https://mathewsachin.github.io';
+const SITE = import.meta.env.SITE || 'https://ngtrphuong.github.io';
 
-const { title, icon, tags = [], related = [], accent_color, ads = true, toc: showToc = true, description, image } = post.data;
+const { title, icon, tags = [], related = [], accent_color, toc: showToc = true, description, image } = post.data;
 const date = getPostDate(post);
 const readTime = estimateReadingTime(post.body ?? '');
 const seriesKey = getSeriesKeyForPostId(postIdFromSlug(post.id));
@@ -44,7 +43,7 @@ const pageUrl = Astro.url.href;
 const canonicalUrl = canonicalPath ? `${SITE}${BASE.replace(/\/$/, '')}${canonicalPath}` : pageUrl;
 const relatedPosts = related.length > 0 ? await getEntries(related) : [];
 ---
-<BaseLayout title={title} description={description} ogImage={image} accentColor={accent_color} ads={ads} canonicalUrl={canonicalUrl}>
+<BaseLayout title={title} description={description} ogImage={image} accentColor={accent_color} canonicalUrl={canonicalUrl}>
 
   <ReadingProgressBar />
 
@@ -129,7 +128,6 @@ const relatedPosts = related.length > 0 ? await getEntries(related) : [];
               <div class="mb-3">
                 <TableOfContents headings={headings} />
               </div>
-              <div class="d-none d-md-block"><AdUnit /></div>
             </div>
           </div>
         )}

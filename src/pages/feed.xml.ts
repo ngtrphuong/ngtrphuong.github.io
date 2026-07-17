@@ -7,10 +7,10 @@ import type { APIContext } from 'astro';
 
 export async function GET(context: APIContext) {
   const posts = await getAllPosts();
-  const SITE = context.site?.toString().replace(/\/$/, '') ?? 'https://mathewsachin.github.io';
+  const SITE = context.site?.toString().replace(/\/$/, '') ?? 'https://ngtrphuong.github.io';
 
   return rss({
-    title: 'Mathew Sachin Blog',
+    title: 'ngtrphuong Blog',
     description: 'My Website where I blog',
     site: SITE,
     items: posts.map(post => ({

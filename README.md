@@ -1,5 +1,5 @@
 
-# MathewSachin.GitHub.io
+# ngtrphuong.github.io
 
 Personal website and blog built with [Astro](https://astro.build/).
 
@@ -26,11 +26,11 @@ Personal website and blog built with [Astro](https://astro.build/).
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/MathewSachin/MathewSachin.GitHub.io.git
-   cd MathewSachin.GitHub.io
+   git clone https://github.com/ngtrphuong/ngtrphuong.github.io.git
+   cd ngtrphuong.github.io
    ```
 
-2. Install dependencies (Mac):
+2. Install dependencies:
 
    ```bash
    npm ci
@@ -62,4 +62,4 @@ npm run preview
 
 ## Deployment
 
-Deployment is automated with GitHub Actions and publishes the generated site to GitHub Pages.
+Deployment is automated with GitHub Actions and publishes the generated site to GitHub Pages at <https://ngtrphuong.github.io/>.

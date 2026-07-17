@@ -1,21 +1,21 @@
-# System Architecture — MathewSachin.GitHub.io
+# System Architecture — ngtrphuong.github.io
 
-> Verified against the current repository source, GitHub Actions workflows, and the live site at [https://mathewsachin.github.io/](https://mathewsachin.github.io/) (checked 2026-07-17). Claims below are grounded in those sources only.
+> Verified against the current repository source, GitHub Actions workflows, and the live site at [https://ngtrphuong.github.io/](https://ngtrphuong.github.io/) (checked 2026-07-17). Claims below are grounded in those sources only.
 
 ---
 
 ## 1. What this application is
 
-A **personal website + blog + browser tools suite** for Mathew Sachin.
+A **personal website + blog + browser tools suite** for ngtrphuong.
 
 | Fact | Value (from source / live site) |
 |------|----------------------------------|
-| Live URL | `https://mathewsachin.github.io` |
-| Repo | `https://github.com/MathewSachin/MathewSachin.GitHub.io` |
+| Live URL | `https://ngtrphuong.github.io` |
+| Repo | `https://github.com/ngtrphuong/ngtrphuong.github.io` |
 | Default branch | `master` |
 | Output model | Fully static (`output: 'static'` in `astro.config.ts`) |
 | Hosting | GitHub Pages via the `gh-pages` branch |
-| Package name | `mathewsachin-blog` (`package.json`) |
+| Package name | `ngtrphuong-blog` (`package.json`) |
 
 Historical note: many layouts/components still comment that they “replace” old Jekyll `_layouts` / `_includes`. The **current** stack is Astro + Svelte, not Jekyll. Older blog posts that mention Jekyll describe past architecture and must not be treated as current deploy docs.
 
@@ -34,8 +34,8 @@ Historical note: many layouts/components still comment that they “replace” o
 | Unit tests | Node.js test runner (`node --test`) | `package.json` → `npm test` |
 | E2E tests | Playwright (Chromium) | `playwright.config.ts` |
 | Comments | Giscus | `src/components/Giscus.astro` |
-| Ads | Google AdSense (production only) | `BaseLayout.astro`, `AdUnit.astro` |
-| Analytics | Google Analytics / gtag (production only) | `GoogleAnalytics.astro` |
+| Ads | Removed | — |
+| Analytics | Removed | — |
 
 **Runtime for tools:** almost all interactive tools run **entirely in the browser** (Web Crypto, WebAssembly, WebCodecs, Web Audio, Cache Storage, etc.). There is no application server.
 
@@ -58,21 +58,20 @@ Historical note: many layouts/components still comment that they “replace” o
 │  • getStaticPaths → HTML pages                                │
 │  • search-index.json (Orama save)                             │
 │  • feed.xml, sitemap                                          │
-│  • rehypeInjectAds markers in markdown                        │
-│  • public/ copied as-is (.nojekyll, ads.txt, dino, pdf worker)│
+│  • public/ copied as-is (.nojekyll, dino, pdf worker)         │
 └──────────────────────────────┬──────────────────────────────┘
                                │  dist/
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              GitHub Pages (static hosting)                    │
-│  Production: https://mathewsachin.github.io/                  │
+│  Production: https://ngtrphuong.github.io/                    │
 │  PR preview: .../pr-preview/pr-{N}/  (same gh-pages branch)   │
 └──────────────────────────────┬──────────────────────────────┘
                                │  Browser
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Astro HTML shells + Svelte islands (client:load / only)      │
-│  Orama search in-memory · Giscus · AdSense/GA (PROD only)     │
+│  Orama search in-memory · Giscus                              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -125,19 +124,19 @@ Two collections:
 
 Site settings from `astro.config.ts`:
 
-- `site: 'https://mathewsachin.github.io'`
-- `trailingSlash: 'always'`
+- `site: 'https://ngtrphuong.github.io'`
+- `trailingSlash: 'ignore'` (legacy blog `.html` URLs + directory routes both work in `astro dev`)
 - `base: process.env.ASTRO_BASE || '/'` (PR previews set `ASTRO_BASE`)
-- `build.format: 'preserve'`
+- `build.format: 'preserve'` (blog `[slug].astro` → `slug.html`; `index.astro` → directory `index.html`)
 
 ### 4.3 Layout hierarchy
 
 ```text
-BaseLayout.astro          ← HTML head, GA, AdSense script, Navbar, ViewTransitions
-  ├─ PostLayout.astro     ← blog posts (TOC, series nav, Giscus, ads sidebar)
-  ├─ ToolLayout.astro     ← tools (header, share, Giscus, ad sidebar)
+BaseLayout.astro          ← HTML head, Navbar, ViewTransitions
+  ├─ PostLayout.astro     ← blog posts (TOC, series nav, Giscus)
+  ├─ ToolLayout.astro     ← tools (header, share, Giscus)
   ├─ SeriesLayout.astro   ← series pages
-  └─ PageLayout.astro     ← simple content pages (e.g. FGA, privacy)
+  └─ PageLayout.astro     ← simple content pages (e.g. FGA)
 ```
 
 MDX rendering goes through `RenderMDX.astro`, which remaps elements (`table`, `blockquote`, `pre`, `in-content-ad-marker`, plus custom `PostLink`, `Pintora`, `AlertInfo`, `Picture`).
@@ -193,9 +192,9 @@ At build, `src/pages/search-index.json.ts`:
 
 At runtime, `Search.svelte` `fetch`es that JSON, `load`s it, and searches locally.
 
-### 5.8 Rehype AST transform (ad density)
+### 5.8 Rehype AST transform
 
-`rehypeInjectAds` walks the markdown HAST and inserts `in-content-ad-marker` nodes before selected `h2` headings (`density: 2` in `astro.config.ts`). Markers render as `InContentAd` via MDX component map.
+Ad injection via rehype was removed. Markdown/MDX renders without in-content ad markers.
 
 ### 5.9 Web Component for navbar behavior
 
@@ -205,9 +204,9 @@ At runtime, `Search.svelte` `fetch`es that JSON, `load`s it, and searches locall
 
 `build-site.yml` and `frontend-tests.yml` are callable workflows parameterized by `baseurl`, `testing`, and `artifact_name`. Used by both production deploy and PR preview.
 
-### 5.11 Environment-gated third parties
+### 5.11 Third-party scripts
 
-`import.meta.env.PROD` gates AdSense and Google Analytics. Testing builds use `NODE_ENV=development` so those integrations stay off during Playwright runs.
+Google AdSense and Google Analytics were removed from the site. Comments still use Giscus (`src/components/Giscus.astro`).
 
 ---
 
@@ -237,7 +236,7 @@ push → master/main
                  clean-exclude: pr-preview
 ```
 
-**Exact publish target:** contents of `dist/` are committed to the **`gh-pages`** branch. GitHub Pages serves that branch at `https://mathewsachin.github.io`.
+**Exact publish target:** contents of `dist/` are committed to the **`gh-pages`** branch. GitHub Pages serves that branch at `https://ngtrphuong.github.io`.
 
 `public/.nojekyll` is present so GitHub Pages does not run Jekyll on the published files.
 
@@ -254,7 +253,7 @@ Workflow: `.github/workflows/pr-preview.yml`
 | Mode | `testing: true` (no AdSense/GA) |
 | Deploy action | `rossjrw/pr-preview-action@v1` |
 | Preview branch | `gh-pages` |
-| Preview URL | `https://mathewsachin.github.io/pr-preview/pr-{NUMBER}/` |
+| Preview URL | `https://ngtrphuong.github.io/pr-preview/pr-{NUMBER}/` |
 | Cleanup | On PR close, preview is removed; production deploy keeps `pr-preview` via `clean-exclude` |
 
 ### 6.3 Other automation
@@ -297,19 +296,15 @@ Published tools are wired by `component` key. Listing uses `listed: true`. Examp
 
 Orphan/incomplete MDX without frontmatter exists (`llm.mdx`, `tokenizer.mdx`) — schema defaults leave `published: false`, so they are not built as tool pages.
 
-Tool logic often prefers client-side libraries: `spark-md5`, `qrcode`, `ion-js`, `diff`/`diff2html`, `@imagemagick/magick-wasm`, `mediabunny`, `@huggingface/transformers`, etc. (`package.json`).
+Tool logic often prefers client-side libraries: `spark-md5`, `qrcode`, `diff`/`diff2html`, `@imagemagick/magick-wasm`, `mediabunny`, `@huggingface/transformers`, etc. (`package.json`).
 
 ### Search
 
 Indexes: posts, tag pages, series pages, listed tools → `/search-index.json`.
 
-### Monetization & privacy surfaces
+### Comments
 
-- AdSense client default: `ca-pub-4251360406988977` (overridable via `PUBLIC_ADSENSE_ID`)
-- `public/ads.txt` matches that publisher id
-- GA default: `UA-70778035-4` (overridable via `PUBLIC_GA_ID`)
-- Privacy page: `/privacy_policy/`
-- Comments: Giscus mapped to repo `MathewSachin/MathewSachin.GitHub.io`, category `Announcements`, `data-mapping="pathname"`
+- Comments: Giscus mapped to repo `ngtrphuong/ngtrphuong.github.io`, category `Announcements`, `data-mapping="pathname"`
 
 ---
 
@@ -375,16 +370,11 @@ ads: true
 2. Register key in `SERIES_CONFIG` inside `src/data/series.ts`.
 3. Post ids must be unique across series (build throws if duplicated).
 
-### 8.5 Ads / analytics / comments
+### 8.5 Comments
 
 | Knob | File / env |
 |------|------------|
-| Disable ads on one post/tool | Frontmatter `ads: false` |
-| AdSense publisher id | `PUBLIC_ADSENSE_ID` or defaults in `BaseLayout.astro` / `AdUnit.astro` |
-| In-content ad density | `rehypeInjectAds` options in `astro.config.ts` |
-| GA id | `PUBLIC_GA_ID` or default in `GoogleAnalytics.astro` |
 | Giscus repo/category/theme | `src/components/Giscus.astro` |
-| Force-off in CI/preview | Already off when `NODE_ENV=development` / `import.meta.env.PROD === false` |
 
 ### 8.6 Search behavior
 
@@ -412,7 +402,6 @@ Do **not** edit `dist/` or `gh-pages` by hand for normal releases — push to `m
 |-------|------|
 | Chrome Dino offline game | `public/dino/` |
 | PDF worker for PDF tool | `public/tools/pdf/pdf.worker.js` |
-| AdSense ads.txt | `public/ads.txt` |
 
 ### 8.9 Funding / Copilot automation
 

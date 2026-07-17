@@ -6,9 +6,7 @@ import sitemap from '@astrojs/sitemap';
 import { fileURLToPath } from 'node:url';
 import linkValidator from 'astro-link-validator';
 
-import { rehypeInjectAds } from './src/plugins/rehype-plugins';
-
-const SITE = 'https://mathewsachin.github.io';
+const SITE = 'https://ngtrphuong.github.io';
 
 // Only run link validation on production builds (not PR preview builds that use a
 // custom base URL, since the validator can't resolve base-prefixed links against dist/).
@@ -30,7 +28,9 @@ export default defineConfig({
   },
   // base is injected at build time via ASTRO_BASE env variable (used for PR previews)
   base: process.env.ASTRO_BASE || '/',
-  trailingSlash: 'always',
+  // 'ignore' so legacy blog URLs (.../slug.html) work in `astro dev` while
+  // directory routes (.../tools/, .../blog/) continue to work with or without a slash.
+  trailingSlash: 'ignore',
   output: 'static',
   integrations,
   vite: {
@@ -50,11 +50,10 @@ export default defineConfig({
   markdown: {
     syntaxHighlight: 'shiki',
     shikiConfig: { theme: 'github-dark' },
-    rehypePlugins: [
-      [rehypeInjectAds, { density: 2 }],
-    ],
   },
   build: {
+    // With [slug].astro → dist/.../slug.html (matches postUrlFromId / legacy Jekyll URLs).
+    // index.astro pages stay as .../index.html directory routes.
     format: 'preserve',
   },
   image: {

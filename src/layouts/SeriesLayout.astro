@@ -4,16 +4,15 @@
  * Replaces _layouts/series.html
  */
 import BaseLayout from '@layouts/BaseLayout.astro';
-import AdUnit from '@components/AdUnit.astro';
 import '@styles/blog.css';
 
 interface Props {
   title: string;
   ads?: boolean;
 }
-const { title, ads = true } = Astro.props;
+const { title } = Astro.props;
 ---
-<BaseLayout title={title} ads={ads}>
+<BaseLayout title={title}>
   <div class="bg-dark">
     <div class="pt-4 pb-5 text-white">
       <div class="container">
@@ -24,18 +23,13 @@ const { title, ads = true } = Astro.props;
 
     <div class="container post-content-container">
       <div class="row">
-        <div class="col-md-10">
+        <div class="col-md-12">
           <div id="post" class="card">
             <div class="card-body">
               <div class="page-content">
                 <slot />
               </div>
             </div>
-          </div>
-        </div>
-        <div class="col-12 col-md-2 order-first order-md-last" id="toc-sidebar">
-          <div class="sticky-md-top" style="top: 10px">
-            <div class="d-none d-md-block"><AdUnit /></div>
           </div>
         </div>
       </div>
