@@ -1,0 +1,40 @@
+---
+description: Always-on core rules for MathewSachin.GitHub.io — static Astro+Svelte site, BASE_URL, validation order, scope discipline
+alwaysApply: true
+---
+
+# Project core
+
+Personal static site: **Astro 7 + Svelte 5 islands → GitHub Pages**. No app server. Tools run in the browser.
+
+## Read first
+
+- `SYSTEM_ARCHITECTURE.md` — architecture, deploy, customization
+- `package.json` — scripts
+- `astro.config.ts` — `site`, `base`, static output, redirects
+- `.github/copilot-instructions.md` — contributor conventions
+
+## Hard constraints
+
+- Keep `output: 'static'`. Do not introduce SSR/API backends unless the user explicitly changes hosting.
+- Always use `import.meta.env.BASE_URL` (or `BASE`) for internal links/assets (PR previews set `ASTRO_BASE`).
+- `trailingSlash: 'always'`. Preserve blog URLs: `/blog/YYYY/MM/DD/slug.html`.
+- Do not edit `dist/`, `test-results/`, `node_modules/`, or hand-edit `gh-pages`.
+- Prefer minimal diffs; no drive-by refactors or unsolicited markdown docs.
+- Match existing Bootstrap 5 + Font Awesome + dark layout patterns.
+
+## Validation order (after meaningful changes)
+
+1. `NODE_ENV=development npm run build`
+2. `npm test`
+3. `npm run check` (note: may already fail on main for `PostLayout` ogImage typing)
+4. `npm run test:e2e` when UI/browser behavior changes
+
+## Path aliases
+
+`@layouts` `@components` `@data` `@utils` `@images` `@content` `@scripts` `@styles`
+
+## Security / governance (always-on companions)
+
+Also active: `security-anti-patterns.mdc`, `agent-governance.mdc`.  
+Do not weaken them. Selective distillation of [sec-context](https://github.com/Arcanum-Sec/sec-context) + OWASP AI secure coding — not the full 65K-token dump.

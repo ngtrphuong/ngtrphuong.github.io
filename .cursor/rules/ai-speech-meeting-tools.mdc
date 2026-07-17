@@ -1,0 +1,98 @@
+---
+description: Browser-first AI tools — STT/ASR, speaker diarization, meeting minutes, Transformers.js, privacy, Workers
+alwaysApply: false
+---
+
+# AI / speech / meeting tools
+
+Use when adding or changing: local LLM, **STT/ASR**, **speaker diarization**, **meeting minutes / clerk**, summarization, or related AI tools.
+
+## Architecture fit (non-negotiable)
+
+This site is **static GitHub Pages**. Default: **on-device / in-browser** processing.
+
+| Approach | Allowed? |
+|----------|----------|
+| Transformers.js / ONNX / WASM / WebGPU in Worker | Yes (preferred) — mirror `LocalAI` |
+| Web Speech API / MediaRecorder / Web Audio | Yes |
+| Upload audio to a **user-chosen** remote API with explicit consent + local key storage | Only if user requests cloud; never hardcode secrets |
+| New server/backend on this repo for inference | No (hosting is static) unless user explicitly migrates hosting |
+
+## Suggested module layout for a new AI tool
+
+```text
+src/scripts/tools/<id>/
+  types.ts              # TranscriptSegment, Speaker, MinutesDoc
+  asr.ts                # STT/ASR adapter interface + impl
+  diarization.ts        # speaker labels over time
+  minutes.ts            # transcript → structured minutes
+  storage.ts            # IndexedDB / Cache / optional FS Access
+src/components/tools/<Name>.svelte
+src/components/tools/<id>/worker.ts   # heavy model I/O
+src/content/tool-docs/<id>.mdx
+# wire component in src/pages/tools/[id]/index.astro with client:only="svelte"
+```
+
+## Adapter interfaces (prefer functions + types)
+
+```ts
+export type TranscriptSegment = {
+  startMs: number;
+  endMs: number;
+  text: string;
+  speakerId?: string;
+  confidence?: number;
+};
+
+export type AsrAdapter = {
+  id: string;
+  transcribe(input: Blob | Float32Array, opts?: { language?: string }): Promise<TranscriptSegment[]>;
+};
+
+export type DiarizationAdapter = {
+  id: string;
+  diarize(audio: Blob, transcript?: TranscriptSegment[]): Promise<TranscriptSegment[]>;
+};
+
+export type MinutesResult = {
+  title: string;
+  attendees: string[];
+  agenda: string[];
+  decisions: string[];
+  actionItems: { owner?: string; task: string; due?: string }[];
+  summary: string;
+  rawTranscript: TranscriptSegment[];
+};
+```
+
+Keep UI free of model details; swap adapters without rewriting the Svelte shell.
+
+## UX / privacy / security requirements
+
+- State clearly: **audio/transcript stays in the browser** (unless user opts into a cloud provider).
+- Ask mic permission only on user gesture; handle deny/AbortError gracefully.
+- Show load progress for model downloads (LocalAI pattern).
+- Cache models via Cache Storage or optional directory picker (`showDirectoryPicker`).
+- Provide export: Markdown / JSON download; optional copy button.
+- Never log raw audio/transcripts to analytics or `console` in prod paths.
+- For minutes: show editable draft before “final”; label AI-generated content.
+- Validate uploaded audio: MIME allowlist + max size; reject exotic containers early.
+- Do not render transcript text with `{@html}` / `innerHTML` (XSS) — use text nodes.
+- Cross-check `security-anti-patterns.mdc` + `privacy-third-parties.mdc` on every AI tool PR.
+
+## Performance
+
+- Run inference in a **Worker**; stream partial transcripts to UI via `postMessage`.
+- Prefer quantized ONNX / small models suitable for browser.
+- Support cancel/abort mid-run; terminate Worker on destroy.
+- Gate WebGPU with capability check + WASM CPU fallback.
+
+## Testing
+
+- Unit-test pure formatters (`minutes.ts` merging, timestamp formatting) in `tests/tools-*.test.ts`.
+- Playwright: fake media flags already in `playwright.config.ts`; mock Worker messages where models are too heavy for CI.
+- Do not download multi‑GB models in CI; use fixtures / stub adapters in tests.
+
+## Dependencies
+
+Prefer extending existing `@huggingface/transformers` before adding overlapping stacks. Justify any new heavy dependency in the PR/summary.

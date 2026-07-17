@@ -1,0 +1,41 @@
+---
+description: CRUD for blog posts, tags, series, and MDX content conventions
+globs: src/content/blog/**,src/data/series/**,src/layouts/PostLayout.astro,src/utils/posts.ts
+alwaysApply: false
+---
+
+# Blog content CRUD
+
+## Create post
+
+1. File: `src/content/blog/YYYY-MM-DD-slug.mdx` (always `.mdx` for new posts)
+2. Frontmatter minimum:
+
+```yaml
+---
+title: "Title"
+description: "SEO / card summary"
+tags: [ai, tutorial]
+# optional: icon, accent_color, date, ads, toc, related, image
+---
+```
+
+3. Body: Markdown/MDX. Remapped components via `RenderMDX.astro`: `Pintora`, `AlertInfo`, `PostLink`, `Picture`, etc.
+4. Series (optional): add post id `/blog/YYYY/MM/DD/slug` (**no** `.html`) to `src/data/series/<series>.ts` and ensure key is in `SERIES_CONFIG` (`src/data/series.ts`)
+5. Related posts: `related: [other-entry-id]` using content collection ids
+
+## URL rules
+
+- Filename may use single-digit M/D; URLs are **zero-padded** via `postUrlFromId()`
+- Shape: `/blog/YYYY/MM/DD/slug.html` — do not break this helper
+
+## Update / delete
+
+- Edit MDX frontmatter/body in place
+- Remove from series maps when deleting
+- Tags pages regenerate from frontmatter at build
+
+## Do not
+
+- Do not invent Jekyll `_posts` paths; content lives in `src/content/blog/`
+- Do not put tool logic inside blog MDX except demo widgets under `src/components/blog/`

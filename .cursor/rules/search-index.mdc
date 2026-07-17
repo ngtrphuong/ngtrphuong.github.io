@@ -1,0 +1,14 @@
+---
+description: Search index and Orama offline search changes
+globs: src/pages/search-index.json.ts,src/scripts/search-index.ts,src/components/Search.svelte
+alwaysApply: false
+---
+
+# Search index
+
+- Build-time Orama DB → static `/search-index.json`
+- Index: posts, tags, series, **listed** tools (`getTools()`)
+- Cap body text with `MAX_CONTENT_LENGTH` (2000)
+- Client: `Search.svelte` fetch → `load` → local `search`
+- After schema/URL changes: rebuild before `npm test`
+- New AI tools appear in search automatically when `published && listed`

@@ -1,0 +1,38 @@
+---
+description: Privacy and data governance — third parties, PII, transcripts, ads/GA, user file handling
+globs: src/components/GoogleAnalytics.astro,src/components/AdUnit.astro,src/components/Giscus.astro,src/layouts/BaseLayout.astro,public/ads.txt,src/components/tools/**/*,src/scripts/tools/**/*,src/pages/privacy_policy/**
+alwaysApply: false
+---
+
+# Privacy & data governance
+
+## Third parties
+
+- AdSense / GA only when `import.meta.env.PROD`
+- IDs via `PUBLIC_ADSENSE_ID` / `PUBLIC_GA_ID` (public) — never private keys
+- Per-page: frontmatter `ads: false`
+- Giscus: change repo/category only with intent; comments are third-party hosted
+
+## User data (tools / AI)
+
+Default posture for all tools (PDF, media, ASR, minutes, LocalAI):
+
+| Data | Rule |
+|------|------|
+| Files / audio / transcripts | Stay in-browser; no silent upload |
+| Cloud API (optional) | Explicit opt-in UI + user-supplied key in memory/`localStorage` only if requested; document risk |
+| Analytics | Never send content of files/transcripts |
+| Export | User-initiated download/copy only |
+| Retention | Prefer session memory; clearable IndexedDB/Cache; document what persists |
+
+## PII in meeting minutes / STT
+
+- Treat transcripts as **sensitive**: names, employers, decisions, action items
+- Label AI-generated minutes; allow edit before export
+- Do not include raw audio/transcript in error reports, Giscus, or GA events
+- Update `/privacy_policy/` when adding cloud STT or persistent storage of transcripts
+
+## SVG / HTML
+
+- `dangerouslyProcessSVG: true` is for **repo-managed** assets only
+- Never process untrusted user SVG as Astro images without sanitization

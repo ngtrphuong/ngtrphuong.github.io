@@ -1,0 +1,36 @@
+---
+description: Astro pages, layouts, content collections, and BASE_URL-safe routing
+globs: "**/*.astro,src/content.config.ts,astro.config.ts,src/pages/**/*.ts"
+alwaysApply: false
+---
+
+# Astro pages & layouts
+
+## Layout chain
+
+`BaseLayout` → `PostLayout` | `ToolLayout` | `SeriesLayout` | `PageLayout`
+
+- Put shared head/nav/ads/GA in `BaseLayout` only when global
+- Tool pages: shell in Astro, interactivity in Svelte islands
+
+## Content collections
+
+Schemas live in `src/content.config.ts` (Zod). When adding frontmatter fields, update the schema first.
+
+## Routing
+
+- File routes under `src/pages/`
+- Dynamic tools: `getStaticPaths` filters `published` tools
+- Endpoints: `feed.xml.ts`, `search-index.json.ts` (prerendered JSON)
+
+## Links & assets
+
+```ts
+const BASE = import.meta.env.BASE_URL;
+// ✅ `${BASE}tools/foo/`
+// ❌ `/tools/foo/` when base may be `/pr-preview/pr-N/`
+```
+
+## Prod-only third parties
+
+Gate AdSense/GA with `import.meta.env.PROD`. Testing builds use `NODE_ENV=development`.

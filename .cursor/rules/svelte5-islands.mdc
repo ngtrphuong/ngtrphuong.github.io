@@ -1,0 +1,41 @@
+---
+description: Svelte 5 runes + Astro islands conventions for interactive UI
+globs: "**/*.svelte,**/*.svelte.ts,**/*.svelte.js"
+alwaysApply: false
+---
+
+# Svelte 5 islands
+
+This project uses **Svelte 5 runes**, not Svelte 4 stores/`$:`.
+
+## Required syntax
+
+```svelte
+<script lang="ts">
+  let { title = '' } = $props();
+  let count = $state(0);
+  let double = $derived(count * 2);
+  $effect(() => { /* side effects */ });
+</script>
+
+<button onclick={() => count++}>{count} / {double}</button>
+```
+
+- Use `onclick={...}` not `on:click`
+- Do **not** import `$state` / `$derived` / `$effect` / `$props` (compiler runes)
+- Prefer pure logic in `@scripts/tools/*`; keep `.svelte` for UI + wiring
+- Heavy work (models, encode, STT): use **Web Worker** (`new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })`) like LocalAI
+- Clean up in `onDestroy` / effect teardown (workers, streams, AudioContext)
+
+## Hydration
+
+Chosen in `src/pages/tools/[id]/index.astro`:
+
+| Directive | When |
+|-----------|------|
+| `client:load` | Default interactive tools |
+| `client:only="svelte"` | No SSR: workers, mic, camera, FS Access, WebGPU |
+
+## UI kit
+
+Reuse Bootstrap classes already used on tool pages. Prefer existing `CopyButton.svelte` patterns over new design systems.

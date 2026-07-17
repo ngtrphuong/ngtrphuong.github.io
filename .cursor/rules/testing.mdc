@@ -1,0 +1,26 @@
+---
+description: Unit and Playwright testing conventions for this repo
+globs: tests/**,playwright.config.ts
+alwaysApply: false
+---
+
+# Testing
+
+## Unit (`npm test`)
+
+- Files: `tests/*.test.ts` via `node --test`
+- Target pure logic in `src/scripts/tools/**`
+- Build first: many tests expect `dist/search-index.json`
+
+## E2E (`npm run test:e2e`)
+
+- Playwright serves **`dist/`** on port **4000** (`playwright.config.ts`)
+- Chromium only; fake media device flags already configured
+- Prefer role/text/`data-testid` over brittle CSS
+- AV sync specs need `ffprobe` (FFmpeg); CI installs it
+
+## When adding a tool
+
+1. Unit tests for script logic
+2. Optional `tests/e2e/<id>.spec.ts` for critical happy path
+3. Keep CI green without requiring huge model downloads

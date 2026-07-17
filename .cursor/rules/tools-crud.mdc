@@ -1,0 +1,65 @@
+---
+description: CRUD checklist for browser tools — tool-docs MDX, Svelte island, scripts logic, registry wiring
+globs: src/content/tool-docs/**/*.mdx,src/components/tools/**/*.{svelte,ts},src/scripts/tools/**/*.ts,src/pages/tools/**/*.astro
+alwaysApply: false
+---
+
+# Tools CRUD
+
+Tools are **content-driven**. Never add a tool only as a page without the full chain.
+
+## Create (required steps)
+
+1. **Logic** (testable): `src/scripts/tools/<id>.ts` (+ optional subfolder like `captura/`)
+2. **Unit test**: `tests/tools-<id>.test.ts` using Node `node:test`
+3. **UI island**: `src/components/tools/<Name>Tool.svelte` (or clear name)
+4. **Docs + frontmatter**: `src/content/tool-docs/<id>.mdx`
+
+```yaml
+---
+title: "Tool Name"
+description: "One line for listing cards"
+icon: "fas fa-icon"
+quick_tool: false
+listed: true
+published: true
+order: 20
+component: "<id>"
+ads: true
+---
+```
+
+5. **Registry**: import + branch in `src/pages/tools/[id]/index.astro`
+   - Prefer `client:load`
+   - Use `client:only="svelte"` for Workers, WebGPU, mic/camera, FS Access, heavy WASM
+6. Build: `NODE_ENV=development npm run build && npm test`
+
+## Read / update / delete
+
+| Action | How |
+|--------|-----|
+| List visible tools | `getTools()` → `published && listed` |
+| Hide from `/tools/` keep URL | `listed: false`, keep `published: true` |
+| Unpublish page | `published: false` |
+| Rename id | rename MDX file id + registry key + links |
+| Delete | remove MDX, Svelte, scripts, registry branch, tests |
+
+## Frontmatter flags
+
+- `quick_tool: true` → home “Quick Tools”
+- `component` string **must** match registry branch exactly
+- Missing `component` on published tools → build throw
+
+## Patterns to copy
+
+- Simple sync tool: `hash` / `base64`
+- Worker + Transformers.js: `LocalAI.svelte` + `localai/worker.ts`
+- State machine / media: `captura/` scripts + `CapturaWebRecorder.svelte`
+
+## Security checklist (new/updated tools)
+
+- [ ] No secrets in client code
+- [ ] User files validated (type + size); processing stays local by default
+- [ ] No `{@html}` / `innerHTML` for user-controlled strings
+- [ ] New npm deps verified (no slopsquatting); prefer existing stack
+- [ ] Docs state privacy posture in `tool-docs` MDX

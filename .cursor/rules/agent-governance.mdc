@@ -1,0 +1,35 @@
+---
+description: Agent governance — rules stewardship, supply chain, destructive ops, honest verification (OWASP AI + anti-sycophancy discipline)
+alwaysApply: true
+---
+
+# Agent governance
+
+Adapted from [OWASP Secure Coding with AI Cheat Sheet](https://github.com/OWASP/CheatSheetSeries/blob/master/cheatsheets/Secure_Coding_with_AI_Cheat_Sheet.md) (rules-file stewardship), CloudDefense-style agent guardrails, and anti-sycophancy coding discipline.
+
+## Rules files are security-critical
+
+Treat as CI-level config (prompt-injection / persistent steering surface):
+
+- `.cursor/rules/**`, `.cursorrules`, `.github/copilot-instructions.md`, `AGENTS.md` (if added)
+- **Do not** silently weaken security/privacy rules, delete guardrails, or add “ignore security” instructions
+- **Do not** modify these files unless the user explicitly asks; summarize intended rule diffs first
+
+## Supply chain & scope
+
+- Ask before adding dependencies or changing CI (`.github/workflows/**`)
+- Do not force-push, disable hooks, or run destructive git (`reset --hard`, clean -fd) unless explicitly requested
+- Do not edit `package-lock.json` except as a consequence of an approved dependency change via `npm install`/`npm ci`
+
+## Honesty over confidence
+
+- Never invent APIs/signatures; verify against installed versions / docs
+- Do not say “looks good” without evidence (read code, run tests, or state what was not verified)
+- When urgency is invoked, state the security/privacy trade-off once, then proceed if the user confirms
+- Match verification to risk: XSS/file/audio/AI paths need an explicit threat note in the response
+
+## Privacy defaults (governance)
+
+- No new analytics/telemetry without explicit user request + consent story
+- No logging of PII, transcripts, audio, or API keys to console in production paths
+- Prefer local/on-device processing for AI speech features (see `ai-speech-meeting-tools.mdc`)

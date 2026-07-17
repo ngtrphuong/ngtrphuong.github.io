@@ -1,0 +1,22 @@
+# MathewSachin.GitHub.io — Cursor rules pointer
+
+> **Executable project rules live in `.cursor/rules/*.mdc`** (Cursor Agent–compatible format).
+> Do not put long always-on instructions here; Agent mode may ignore legacy `.cursorrules`.
+
+## Quick facts
+
+- Stack: Astro 7 static SSG + Svelte 5 islands → GitHub Pages (`gh-pages`)
+- Docs: `SYSTEM_ARCHITECTURE.md`, `.github/copilot-instructions.md`
+- Tools CRUD: content MDX + Svelte island + `src/pages/tools/[id]/index.astro` registry
+- AI / STT / ASR / diarization / meeting minutes: `@ai-speech-meeting-tools`
+- Security / privacy / governance: `@security-anti-patterns`, `@agent-governance`, `@privacy-third-parties`
+
+## Rule index
+
+See `.cursor/rules/README.md`.
+
+## Validate
+
+```bash
+NODE_ENV=development npm run build && npm test && npm run check
+```

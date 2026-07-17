@@ -1,0 +1,58 @@
+---
+description: Selective security anti-patterns for this static Astro+Svelte site (XSS, secrets, deps, file handling) — distilled from Arcanum sec-context + OWASP AI secure coding
+alwaysApply: true
+---
+
+# Security anti-patterns (project-scoped)
+
+Sources (adapted, not copied wholesale): [Arcanum-Sec/sec-context](https://github.com/Arcanum-Sec/sec-context) (CC BY 4.0), [OWASP Secure Coding with AI](https://github.com/OWASP/CheatSheetSeries/blob/master/cheatsheets/Secure_Coding_with_AI_Cheat_Sheet.md), awesome-cursorrules DevSecOps rule.
+
+**Out of scope here:** SQL/NoSQL injection, server auth/JWT, IDOR APIs — this repo has no app server/DB. Do not invent backend security theater.
+
+## 1. Dependency risks / slopsquatting (Top AI failure)
+
+- Only add packages that **exist on npm** and are justified; verify name spelling against registry.
+- Prefer packages already in `package.json` (e.g. `@huggingface/transformers`) before new stacks.
+- Do not invent package names, APIs, or versions. If unsure: say so and ask before `npm install`.
+- Prefer `npm ci` in CI; do not casually rewrite lockfile for unrelated work.
+
+## 2. XSS (CWE-79) — critical for this frontend
+
+- Prefer `textContent` / Svelte text interpolation over `innerHTML` / `{@html}`.
+- `{@html}` / `innerHTML` only for **trusted, developer-controlled** markup (e.g. library HTML from Diff2Html). Never pipe raw user/URL/file text into HTML.
+- Sanitize if untrusted HTML is unavoidable (e.g. DOMPurify) — do not roll a regex sanitizer.
+- Existing hotspots to treat carefully: `Search.svelte` `{@html status}`, `DiffTool.svelte`, `ImageCompressor.svelte`, `pdf.ts` status HTML.
+
+## 3. Secrets (CWE-798)
+
+- Never hardcode API keys, tokens, private keys, or cloud credentials.
+- Never put secrets in client bundles. `PUBLIC_*` env vars are **public**.
+- Do not commit `.env`, key files, or pasted secrets. If a secret appears in chat/diff: warn and recommend rotation.
+- Allowed public IDs (AdSense/GA) stay gated behind `import.meta.env.PROD`.
+
+## 4. Input validation & file handling (CWE-20 / CWE-434)
+
+Browser tools accept user files/audio — validate **in the client** before processing:
+
+- Enforce **MIME allowlists** + size caps (reject huge uploads early).
+- Do not trust filename extensions alone; prefer magic/bytes checks when libraries support them.
+- Never use user-supplied paths for FS Access beyond the user-picked directory handle.
+- No `eval`, `new Function`, or dynamic `import()` of user-controlled URLs/strings.
+
+## 5. Crypto honesty
+
+- Do not use MD5/SHA-1 for **security** (auth, integrity of untrusted data). Existing Hash tool may offer them as **checksums** if labeled non-security.
+- Prefer Web Crypto (`crypto.subtle`) / `crypto.getRandomValues` over homemade RNG.
+
+## 6. Workers / postMessage
+
+- Validate `message` shape from Workers; do not `eval` message payloads.
+- Terminate Workers on destroy; revoke Object URLs.
+
+## Quick self-check before finishing a change
+
+- [ ] No new secret material in source
+- [ ] No unsanitized user data into HTML
+- [ ] New deps verified (or none added)
+- [ ] File/audio inputs size + type limited
+- [ ] Privacy copy still accurate for browser-only processing
