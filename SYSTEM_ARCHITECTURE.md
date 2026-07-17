@@ -1,4 +1,4 @@
-# System Architecture — ngtrphuong.github.io
+# System Architecture — [ngtrphuong.github.io](http://ngtrphuong.github.io)
 
 > Verified against the current repository source, GitHub Actions workflows, and the live site at [https://ngtrphuong.github.io/](https://ngtrphuong.github.io/) (checked 2026-07-17). Claims below are grounded in those sources only.
 
@@ -8,119 +8,138 @@
 
 A **personal website + blog + browser tools suite** for Phuong Nguyen (`ngtrphuong`).
 
-| Fact | Value (from source / live site) |
-|------|----------------------------------|
-| Live URL | `https://ngtrphuong.github.io` |
-| Repo | `https://github.com/ngtrphuong/ngtrphuong.github.io` |
-| Default branch | `master` |
-| Output model | Fully static (`output: 'static'` in `astro.config.ts`) |
-| Hosting | GitHub Pages via the `gh-pages` branch |
-| Package name | `ngtrphuong-blog` (`package.json`) |
+
+| Fact           | Value (from source / live site)                        |
+| -------------- | ------------------------------------------------------ |
+| Live URL       | `https://ngtrphuong.github.io`                         |
+| Repo           | `https://github.com/ngtrphuong/ngtrphuong.github.io`   |
+| Default branch | `master`                                               |
+| Output model   | Fully static (`output: 'static'` in `astro.config.ts`) |
+| Hosting        | GitHub Pages via the `gh-pages` branch                 |
+| Package name   | `ngtrphuong-blog` (`package.json`)                     |
+
 
 Historical note: many layouts/components still comment that they “replace” old Jekyll `_layouts` / `_includes`. The **current** stack is Astro + Svelte, not Jekyll. Older blog posts that mention Jekyll describe past architecture and must not be treated as current deploy docs.
 
 ---
 
+
+
 ## 2. Technology stack
 
-| Layer | Technology | Evidence |
-|-------|------------|----------|
-| Site generator | **Astro** (`astro` ^7) | `package.json`, `astro.config.ts` |
-| Interactive UI | **Svelte 5** (`@astrojs/svelte`) | `package.json`, `svelte.config.js`, `*.svelte` |
-| Content | **MDX / Markdown** content collections | `src/content.config.ts`, `src/content/blog/`, `src/content/tool-docs/` |
-| Styling | Bootstrap 5 + Font Awesome + custom CSS | `BaseLayout.astro`, `src/styles/` |
-| Search | **Orama** (client-side full-text) | `src/pages/search-index.json.ts`, `Search.svelte` |
-| Images | Astro assets + Sharp | `astro.config.ts` (`image.service`) |
-| Unit tests | Node.js test runner (`node --test`) | `package.json` → `npm test` |
-| E2E tests | Playwright (Chromium) | `playwright.config.ts` |
-| Comments | Giscus | `src/components/Giscus.astro` |
-| Ads | Removed | — |
-| Analytics | Removed | — |
+
+| Layer          | Technology                              | Evidence                                                               |
+| -------------- | --------------------------------------- | ---------------------------------------------------------------------- |
+| Site generator | **Astro** (`astro` ^7)                  | `package.json`, `astro.config.ts`                                      |
+| Interactive UI | **Svelte 5** (`@astrojs/svelte`)        | `package.json`, `svelte.config.js`, `*.svelte`                         |
+| Content        | **MDX / Markdown** content collections  | `src/content.config.ts`, `src/content/blog/`, `src/content/tool-docs/` |
+| Styling        | Bootstrap 5 + Font Awesome + custom CSS | `BaseLayout.astro`, `src/styles/`                                      |
+| Search         | **Orama** (client-side full-text)       | `src/pages/search-index.json.ts`, `Search.svelte`                      |
+| Images         | Astro assets + Sharp                    | `astro.config.ts` (`image.service`)                                    |
+| Unit tests     | Node.js test runner (`node --test`)     | `package.json` → `npm test`                                            |
+| E2E tests      | Playwright (Chromium)                   | `playwright.config.ts`                                                 |
+| Comments       | Giscus                                  | `src/components/Giscus.astro`                                          |
+| Ads            | Removed                                 | —                                                                      |
+| Analytics      | Removed                                 | —                                                                      |
+
 
 **Runtime for tools:** almost all interactive tools run **entirely in the browser** (Web Crypto, WebAssembly, WebCodecs, Web Audio, Cache Storage, etc.). There is no application server.
 
 ---
 
+
+
 ## 3. High-level architecture
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
+┌───────────────────────────────────────────────────────────────┐
 │                     Authoring / Source                        │
 │  src/content/blog/*.mdx   src/content/tool-docs/*.mdx         │
 │  src/pages/**/*.astro     src/components/**                   │
 │  src/scripts/tools/**     src/data/**                         │
-└──────────────────────────────┬──────────────────────────────┘
+└──────────────────────────────┬────────────────────────────────┘
                                │  npm run build (astro build)
                                ▼
-┌─────────────────────────────────────────────────────────────┐
+┌───────────────────────────────────────────────────────────────┐
 │                 Build-time (Node / Astro SSG)                 │
 │  • Content collections validated (Zod schemas)                │
 │  • getStaticPaths → HTML pages                                │
 │  • search-index.json (Orama save)                             │
 │  • feed.xml, sitemap                                          │
 │  • public/ copied as-is (.nojekyll, dino, pdf worker)         │
-└──────────────────────────────┬──────────────────────────────┘
+└──────────────────────────────┬────────────────────────────────┘
                                │  dist/
                                ▼
-┌─────────────────────────────────────────────────────────────┐
+┌───────────────────────────────────────────────────────────────┐
 │              GitHub Pages (static hosting)                    │
 │  Production: https://ngtrphuong.github.io/                    │
 │  PR preview: .../pr-preview/pr-{N}/  (same gh-pages branch)   │
-└──────────────────────────────┬──────────────────────────────┘
+└──────────────────────────────┬────────────────────────────────┘
                                │  Browser
                                ▼
-┌─────────────────────────────────────────────────────────────┐
+┌───────────────────────────────────────────────────────────────┐
 │  Astro HTML shells + Svelte islands (client:load / only)      │
 │  Orama search in-memory · Giscus                              │
-└─────────────────────────────────────────────────────────────┘
+└───────────────────────────────────────────────────────────────┘
 ```
+
+
 
 ### Layering inside the repo
 
-| Path | Role |
-|------|------|
-| `src/pages/` | File-based routes + API endpoints (`feed.xml`, `search-index.json`) |
-| `src/layouts/` | Page shells (`BaseLayout` → `PostLayout` / `ToolLayout` / …) |
-| `src/components/` | Reusable Astro + Svelte UI |
-| `src/components/tools/` | Tool UIs (Svelte islands) |
-| `src/scripts/tools/` | Pure/browser logic used by tools (often unit-tested) |
-| `src/content/` | Blog posts, tool docs, images |
-| `src/data/` | Series config, tool listing helpers, donations data |
-| `src/utils/` | Shared blog URL/date/tag helpers |
-| `src/plugins/` | Rehype plugins (ad injection) |
-| `public/` | Static assets copied verbatim into `dist/` |
-| `tests/` | Unit (`*.test.ts`) and Playwright (`*.spec.ts`) |
-| `.github/workflows/` | CI / deploy / PR preview / AI post trigger |
+
+| Path                    | Role                                                                |
+| ----------------------- | ------------------------------------------------------------------- |
+| `src/pages/`            | File-based routes + API endpoints (`feed.xml`, `search-index.json`) |
+| `src/layouts/`          | Page shells (`BaseLayout` → `PostLayout` / `ToolLayout` / …)        |
+| `src/components/`       | Reusable Astro + Svelte UI                                          |
+| `src/components/tools/` | Tool UIs (Svelte islands)                                           |
+| `src/scripts/tools/`    | Pure/browser logic used by tools (often unit-tested)                |
+| `src/content/`          | Blog posts, tool docs, images                                       |
+| `src/data/`             | Series config, tool listing helpers, donations data                 |
+| `src/utils/`            | Shared blog URL/date/tag helpers                                    |
+| `src/plugins/`          | Rehype plugins (ad injection)                                       |
+| `public/`               | Static assets copied verbatim into `dist/`                          |
+| `tests/`                | Unit (`*.test.ts`) and Playwright (`*.spec.ts`)                     |
+| `.github/workflows/`    | CI / deploy / PR preview / AI post trigger                          |
+
 
 Path aliases (Vite + TypeScript): `@layouts`, `@components`, `@data`, `@utils`, `@images`, `@content`, `@scripts`, `@styles` — see `astro.config.ts` and `tsconfig.json`.
 
 ---
 
+
+
 ## 4. Content & routing model
+
+
 
 ### 4.1 Content collections (`src/content.config.ts`)
 
 Two collections:
 
-1. **`blog`** — `src/content/blog/**/*.{md,mdx}`  
-   Frontmatter (Zod): `title`, optional `icon`, `tags`, `related` (references), `accent_color`, `date`, `ads`, `toc`, `manifest`, `redirect_from`, `description`, `image`.
+1. `blog` — `src/content/blog/**/*.{md,mdx}`
+  Frontmatter (Zod): `title`, optional `icon`, `tags`, `related` (references), `accent_color`, `date`, `ads`, `toc`, `manifest`, `redirect_from`, `description`, `image`.
+2. `toolDocs` — `src/content/tool-docs/*.mdx`
+  Frontmatter: `title`, `description`, `icon`, `accent_color`, `quick_tool`, `listed`, `published`, `order`, `component`, `ads`, `manifest`.
 
-2. **`toolDocs`** — `src/content/tool-docs/*.mdx`  
-   Frontmatter: `title`, `description`, `icon`, `accent_color`, `quick_tool`, `listed`, `published`, `order`, `component`, `ads`, `manifest`.
+
 
 ### 4.2 Important URL conventions
 
-| Resource | URL shape | Derived from |
-|----------|-----------|--------------|
-| Blog post | `/blog/YYYY/MM/DD/slug.html` | Filename `YYYY-MM-DD-slug.mdx` via `postUrlFromId()` |
-| Blog list | `/blog/` then `/blog/page/N/` | 10 posts per page |
-| Tags | `/blog/tags/{slug}/` | `tagSlug()` |
-| Series | `/blog/series/{key}/` | `src/data/series.ts` |
-| Tool | `/tools/{id}/` | `toolDocs` entry id + `published: true` |
-| Search | `/search/` + `/search-index.json` | `Search.svelte` + endpoint |
-| RSS | `/feed.xml` | `@astrojs/rss` |
-| FGA page | `/FGA/` | `src/pages/FGA/index.astro` |
-| Redirects | `/Captura/` → `/tools/captura/`, `/Fate-Grand-Automata/` → `/FGA/` | `astro.config.ts` `redirects` |
+
+| Resource  | URL shape                                                          | Derived from                                         |
+| --------- | ------------------------------------------------------------------ | ---------------------------------------------------- |
+| Blog post | `/blog/YYYY/MM/DD/slug.html`                                       | Filename `YYYY-MM-DD-slug.mdx` via `postUrlFromId()` |
+| Blog list | `/blog/` then `/blog/page/N/`                                      | 10 posts per page                                    |
+| Tags      | `/blog/tags/{slug}/`                                               | `tagSlug()`                                          |
+| Series    | `/blog/series/{key}/`                                              | `src/data/series.ts`                                 |
+| Tool      | `/tools/{id}/`                                                     | `toolDocs` entry id + `published: true`              |
+| Search    | `/search/` + `/search-index.json`                                  | `Search.svelte` + endpoint                           |
+| RSS       | `/feed.xml`                                                        | `@astrojs/rss`                                       |
+| FGA page  | `/FGA/`                                                            | `src/pages/FGA/index.astro`                          |
+| Redirects | `/Captura/` → `/tools/captura/`, `/Fate-Grand-Automata/` → `/FGA/` | `astro.config.ts` `redirects`                        |
+
 
 Site settings from `astro.config.ts`:
 
@@ -128,6 +147,8 @@ Site settings from `astro.config.ts`:
 - `trailingSlash: 'ignore'` (legacy blog `.html` URLs + directory routes both work in `astro dev`)
 - `base: process.env.ASTRO_BASE || '/'` (PR previews set `ASTRO_BASE`)
 - `build.format: 'preserve'` (blog `[slug].astro` → `slug.html`; `index.astro` → directory `index.html`)
+
+
 
 ### 4.3 Layout hierarchy
 
@@ -142,6 +163,8 @@ BaseLayout.astro          ← HTML head, Navbar, ViewTransitions
 MDX rendering goes through `RenderMDX.astro`, which remaps elements (`table`, `blockquote`, `pre`, `in-content-ad-marker`, plus custom `PostLink`, `Pintora`, `AlertInfo`, `Picture`).
 
 ---
+
+
 
 ## 5. Design patterns in use
 
@@ -176,9 +199,11 @@ Layouts wrap each other (`ToolLayout` / `PostLayout` → `BaseLayout`) and use s
 
 ### 5.6 Separation of UI and logic
 
-| UI | Logic |
-|----|-------|
+
+| UI                              | Logic                                              |
+| ------------------------------- | -------------------------------------------------- |
 | `src/components/tools/*.svelte` | `src/scripts/tools/*.ts` (+ `captura/` submodules) |
+
 
 Unit tests target the logic modules (`tests/tools-*.test.ts`).
 
@@ -186,9 +211,9 @@ Unit tests target the logic modules (`tests/tools-*.test.ts`).
 
 At build, `src/pages/search-index.json.ts`:
 
-1. Loads blog posts, tags, series, listed tools  
-2. Inserts into Orama  
-3. Serializes with `save()` to static JSON  
+1. Loads blog posts, tags, series, listed tools
+2. Inserts into Orama
+3. Serializes with `save()` to static JSON
 
 At runtime, `Search.svelte` `fetch`es that JSON, `load`s it, and searches locally.
 
@@ -210,7 +235,11 @@ Google AdSense and Google Analytics were removed from the site. Comments still u
 
 ---
 
+
+
 ## 6. Exact deployment
+
+
 
 ### 6.1 Production path (push to `main` or `master`)
 
@@ -236,7 +265,7 @@ push → master/main
                  clean-exclude: pr-preview
 ```
 
-**Exact publish target:** contents of `dist/` are committed to the **`gh-pages`** branch. GitHub Pages serves that branch at `https://ngtrphuong.github.io`.
+**Exact publish target:** contents of `dist/` are committed to the `gh-pages` branch. GitHub Pages serves that branch at `https://ngtrphuong.github.io`.
 
 `public/.nojekyll` is present so GitHub Pages does not run Jekyll on the published files.
 
@@ -246,24 +275,32 @@ CI Node version: **22** (`actions/setup-node` in `build-site.yml`). README docum
 
 Workflow: `.github/workflows/pr-preview.yml`
 
-| Step | Detail |
-|------|--------|
-| Trigger | PR opened / reopened / synchronize / closed |
-| Build base | `ASTRO_BASE=/pr-preview/pr-{number}` |
-| Mode | `testing: true` (no AdSense/GA) |
-| Deploy action | `rossjrw/pr-preview-action@v1` |
-| Preview branch | `gh-pages` |
-| Preview URL | `https://ngtrphuong.github.io/pr-preview/pr-{NUMBER}/` |
-| Cleanup | On PR close, preview is removed; production deploy keeps `pr-preview` via `clean-exclude` |
+
+| Step           | Detail                                                                                    |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| Trigger        | PR opened / reopened / synchronize / closed                                               |
+| Build base     | `ASTRO_BASE=/pr-preview/pr-{number}`                                                      |
+| Mode           | `testing: true` (no AdSense/GA)                                                           |
+| Deploy action  | `rossjrw/pr-preview-action@v1`                                                            |
+| Preview branch | `gh-pages`                                                                                |
+| Preview URL    | `https://ngtrphuong.github.io/pr-preview/pr-{NUMBER}/`                                    |
+| Cleanup        | On PR close, preview is removed; production deploy keeps `pr-preview` via `clean-exclude` |
+
+
+
 
 ### 6.3 Other automation
 
-| Workflow | Purpose |
-|----------|---------|
-| `ai-blog-post.yml` | Manual `workflow_dispatch`: creates a GitHub issue assigned to Copilot with blog-writing instructions (`COPILOT_PAT` secret) |
-| `pr-frontend-tests.yml` | PR-focused frontend test pipeline |
-| `copilot-setup-steps.yml` | Preinstalls deps/tools for Copilot coding agent |
-| `dependabot.yml` | Dependency update PRs |
+
+| Workflow                  | Purpose                                                                                                                      |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `ai-blog-post.yml`        | Manual `workflow_dispatch`: creates a GitHub issue assigned to Copilot with blog-writing instructions (`COPILOT_PAT` secret) |
+| `pr-frontend-tests.yml`   | PR-focused frontend test pipeline                                                                                            |
+| `copilot-setup-steps.yml` | Preinstalls deps/tools for Copilot coding agent                                                                              |
+| `dependabot.yml`          | Dependency update PRs                                                                                                        |
+
+
+
 
 ### 6.4 Local build / validate (canonical)
 
@@ -280,7 +317,11 @@ Playwright serves `dist/` with `python3 -m http.server 4000` (`playwright.config
 
 ---
 
+
+
 ## 7. Feature subsystems (concise)
+
+
 
 ### Blog
 
@@ -289,6 +330,8 @@ Playwright serves `dist/` with `python3 -m http.server 4000` (`playwright.config
 - Series: `blogging-with-jekyll`, `browser-hacks` in `src/data/series.ts` (+ per-series modules).
 - Related posts via content `reference('blog')`.
 - In-post widgets under `src/components/blog/` (Chrome Dino demos, bookmarklet helpers, etc.).
+
+
 
 ### Tools
 
@@ -308,7 +351,11 @@ Indexes: posts, tag pages, series pages, listed tools → `/search-index.json`.
 
 ---
 
+
+
 ## 8. How to customize (detailed)
+
+
 
 ### 8.1 Add a blog post
 
@@ -324,9 +371,9 @@ tags: [example]
 ---
 ```
 
-3. Body: Markdown/MDX. Use remapped components as needed (`Pintora`, `AlertInfo`, `PostLink`, …).
-4. To place in a series: add the post id (`/blog/YYYY/MM/DD/slug` **without** `.html`) to the correct series module under `src/data/series/`.
-5. Validate: `NODE_ENV=development npm run build && npm test`.
+1. Body: Markdown/MDX. Use remapped components as needed (`Pintora`, `AlertInfo`, `PostLink`, …).
+2. To place in a series: add the post id (`/blog/YYYY/MM/DD/slug` **without** `.html`) to the correct series module under `src/data/series/`.
+3. Validate: `NODE_ENV=development npm run build && npm test`.
 
 URL month/day are **zero-padded** even if the filename uses single digits.
 
@@ -350,19 +397,25 @@ ads: true
 ---
 ```
 
-4. **Register** in `src/pages/tools/[id]/index.astro`: import the Svelte component and add a `toolComponentKey === 'my-tool'` branch (`client:load` or `client:only` as appropriate).
-5. Rebuild and test.
+1. **Register** in `src/pages/tools/[id]/index.astro`: import the Svelte component and add a `toolComponentKey === 'my-tool'` branch (`client:load` or `client:only` as appropriate).
+2. Rebuild and test.
+
+
 
 ### 8.3 Change site chrome / branding
 
-| What | Where |
-|------|--------|
-| Site URL / base / redirects | `astro.config.ts` |
-| Navbar links / brand text | `src/components/Navbar.astro` |
-| Home hero, project cards, social links | `src/pages/index.astro` |
-| Global CSS | `src/styles/styles.css`, `src/styles/blog.css` |
-| Favicon | `public/images/favicon.ico` |
-| Avatar / content images | `src/content/images/` (import via `@images`) |
+
+| What                                   | Where                                          |
+| -------------------------------------- | ---------------------------------------------- |
+| Site URL / base / redirects            | `astro.config.ts`                              |
+| Navbar links / brand text              | `src/components/Navbar.astro`                  |
+| Home hero, project cards, social links | `src/pages/index.astro`                        |
+| Global CSS                             | `src/styles/styles.css`, `src/styles/blog.css` |
+| Favicon                                | `public/images/favicon.ico`                    |
+| Avatar / content images                | `src/content/images/` (import via `@images`)   |
+
+
+
 
 ### 8.4 Series
 
@@ -370,38 +423,54 @@ ads: true
 2. Register key in `SERIES_CONFIG` inside `src/data/series.ts`.
 3. Post ids must be unique across series (build throws if duplicated).
 
+
+
 ### 8.5 Comments
 
-| Knob | File / env |
-|------|------------|
+
+| Knob                       | File / env                    |
+| -------------------------- | ----------------------------- |
 | Giscus repo/category/theme | `src/components/Giscus.astro` |
+
+
+
 
 ### 8.6 Search behavior
 
-| Change | File |
-|--------|------|
-| What gets indexed | `src/pages/search-index.json.ts` |
+
+| Change             | File                                            |
+| ------------------ | ----------------------------------------------- |
+| What gets indexed  | `src/pages/search-index.json.ts`                |
 | Markdown stripping | `src/scripts/search-index.ts` → `stripMarkdown` |
-| UI / query | `src/components/Search.svelte` |
-| Content length cap | `MAX_CONTENT_LENGTH = 2000` in the endpoint |
+| UI / query         | `src/components/Search.svelte`                  |
+| Content length cap | `MAX_CONTENT_LENGTH = 2000` in the endpoint     |
+
+
+
 
 ### 8.7 Deploy / preview behavior
 
-| Change | File |
-|--------|------|
-| Production deploy gates | `.github/workflows/deploy.yml` |
-| Build env / Node / artifacts | `.github/workflows/build-site.yml` |
-| E2E in CI | `.github/workflows/frontend-tests.yml` |
-| PR preview base path | `.github/workflows/pr-preview.yml` (`baseurl` input) |
+
+| Change                       | File                                                 |
+| ---------------------------- | ---------------------------------------------------- |
+| Production deploy gates      | `.github/workflows/deploy.yml`                       |
+| Build env / Node / artifacts | `.github/workflows/build-site.yml`                   |
+| E2E in CI                    | `.github/workflows/frontend-tests.yml`               |
+| PR preview base path         | `.github/workflows/pr-preview.yml` (`baseurl` input) |
+
 
 Do **not** edit `dist/` or `gh-pages` by hand for normal releases — push to `master` and let Actions publish.
 
 ### 8.8 Static assets & embeds
 
-| Asset | Path |
-|-------|------|
-| Chrome Dino offline game | `public/dino/` |
-| PDF worker for PDF tool | `public/tools/pdf/pdf.worker.js` |
+
+| Asset                    | Path                             |
+| ------------------------ | -------------------------------- |
+| Chrome Dino offline game | `public/dino/`                   |
+| PDF worker for PDF tool  | `public/tools/pdf/pdf.worker.js` |
+
+
+
 
 ### 8.9 Funding / Copilot automation
 
@@ -410,13 +479,17 @@ Do **not** edit `dist/` or `gh-pages` by hand for normal releases — push to `m
 
 ---
 
+
+
 ## 9. Testing map
 
-| Command | What it covers |
-|---------|----------------|
-| `npm test` | Logic under `tests/*.test.ts` (many tools + search index file presence in `dist/`) |
-| `npm run test:e2e` | Browser flows in `tests/**/*.spec.ts` and top-level `*.spec.ts` |
-| `npm run check` | Astro + Svelte type/check |
+
+| Command            | What it covers                                                                     |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| `npm test`         | Logic under `tests/*.test.ts` (many tools + search index file presence in `dist/`) |
+| `npm run test:e2e` | Browser flows in `tests/**/*.spec.ts` and top-level `*.spec.ts`                    |
+| `npm run check`    | Astro + Svelte type/check                                                          |
+
 
 Known operational constraints (from `.github/copilot-instructions.md`):
 
@@ -426,15 +499,19 @@ Known operational constraints (from `.github/copilot-instructions.md`):
 
 ---
 
+
+
 ## 10. Mental model for contributors
 
 1. **Content first** — posts and tool docs are data; pages are thin routers.
 2. **Static forever** — no SSR server; anything interactive must work in the browser after `astro build`.
-3. **Respect `BASE_URL`** — always use `import.meta.env.BASE_URL` for internal links so PR previews work.
+3. **Respect** `BASE_URL` — always use `import.meta.env.BASE_URL` for internal links so PR previews work.
 4. **Register tools explicitly** — frontmatter `component` alone is not enough; wire the Svelte island in `tools/[id]/index.astro`.
 5. **Deploy is gated** — production HTML only ships after a green production build **and** Playwright against a testing build.
 
 ---
+
+
 
 ## 11. Source-of-truth checklist (anti-hallucination)
 
@@ -449,9 +526,11 @@ When updating this document, re-verify against:
 
 ---
 
+
+
 ## 12. Cursor / agent rules
 
-Executable AI coding rules live in **`.cursor/rules/*.mdc`** (see `.cursor/rules/README.md`). Root `.cursorrules` is a pointer only.
+Executable AI coding rules live in `.cursor/rules/*.mdc` (see `.cursor/rules/README.md`). Root `.cursorrules` is a pointer only.
 
 Always-on security/governance rules selectively adapt [Arcanum sec-context](https://github.com/Arcanum-Sec/sec-context) + [OWASP Secure Coding with AI](https://github.com/OWASP/CheatSheetSeries/blob/master/cheatsheets/Secure_Coding_with_AI_Cheat_Sheet.md) for this **static, browser-tool** threat model (XSS, secrets, slopsquatting, file/audio handling, PII in transcripts) — not the full upstream corpora.
 
