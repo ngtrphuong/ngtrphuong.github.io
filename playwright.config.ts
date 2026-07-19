@@ -12,6 +12,9 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
+        // Prefer installed Chrome — bundled Chromium crashes on Meeting Notes hydration
+        // (Whisper worker / WASM) on Windows in this environment.
+        channel: 'chrome',
         launchOptions: {
           args: [
             '--use-fake-ui-for-media-stream',

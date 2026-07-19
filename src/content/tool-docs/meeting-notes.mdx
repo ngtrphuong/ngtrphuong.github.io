@@ -1,0 +1,103 @@
+---
+title: "Meeting Notes"
+description: "Live captions and on-device transcription for meetings — browser-first, no server."
+icon: "fas fa-microphone-lines"
+quick_tool: false
+listed: true
+published: true
+order: 16
+component: "meeting-notes"
+ads: false
+accent_color: "#6f42c1"
+---
+
+#### How it works
+
+This tool uses a **hybrid** speech-to-text setup:
+
+| Mode | Tab | Engine | When text appears |
+|------|-----|--------|-------------------|
+| Live captions | **Live** | Web Speech API (default) or LocalAI (Whisper) | Word-by-word (Web Speech) or after each pause (LocalAI) |
+| Record → transcribe | **Record** | Whisper | Streamed while recording, or after you stop |
+| Upload file | **Upload** | Whisper | After transcribe finishes |
+
+**Record** and **Live** both support **microphone**, **system/tab audio** (via screen share), or **both mixed** — ideal for transcribing Zoom, Teams, Meet, or any audio playing on your computer.
+
+#### Live: Web Speech API vs. LocalAI
+
+The **Live** tab defaults to the **Web Speech API** — it's generally the most accurate option available in the browser, including for Vietnamese, and gives instant word-by-word captions with no model download. **LocalAI** (Whisper) is the fallback for Firefox (no Web Speech support) or when you want fully offline/private processing; it has no interim captions — a line appears once you pause, with a "Listening…" indicator in between.
+
+For a Vietnamese meeting with occasional English technical terms, select **Vietnamese**. Web Speech accepts one primary language rather than true automatic bilingual detection, but its Vietnamese recognizer commonly preserves English product names and phrases spoken in context.
+
+Whichever engine you pick, a lightweight **voice-activity detector (VAD)** also runs in the background purely to time actual pauses in speech precisely — see **Speaker labels** below.
+
+#### One model for Record, Upload, and LocalAI Live
+
+Load the Whisper model once (~40–75 MB depending on the size you pick) and it's cached in your browser. **Record** and **Upload** always use it; **Live** only needs it if you switch to the LocalAI engine.
+
+#### System / tab audio
+
+To capture what you hear in a meeting (not just your mic), on **Live** or **Record**:
+
+1. If using LocalAI or Record/Upload, load the Whisper model first (one-time download).
+2. Choose **System / tab audio** or **Microphone + system audio**.
+3. Click **Start** — the browser opens a share picker.
+4. Pick the **tab** with your meeting and enable **Share tab audio**, *or* share your **entire screen** and enable **Share system audio** (desktop only; OS/browser dependent).
+5. On **Record**, click **Stop and transcribe** when done. On **Live**, captions stream continuously — click **Stop captions** when you're finished.
+
+Web Speech tab/system-audio capture needs Chrome/Edge 135+; on older browsers or Firefox, switch to **Microphone**, use **LocalAI**, or use **Record/Upload** instead.
+
+If you stop sharing from the browser toolbar, capture ends automatically.
+
+#### On-device language packs (Live tab, Web Speech engine)
+
+Chrome and Edge can run Web Speech captions **fully on-device** after a one-time language pack download (managed by the browser, not this site):
+
+1. On the **Live** tab with the **Web Speech API** engine selected, keep **Prefer on-device recognition** checked.
+2. If status shows **Download available**, click **Install language pack** (requires Chrome/Edge).
+3. When status shows **Installed**, click **Start live captions**.
+
+Most browsers don't have the pack pre-installed, so **Allow cloud fallback** is checked by default — without it, Live captions fail immediately on a fresh profile. Uncheck it only if you specifically want on-device-or-nothing behavior.
+
+#### Speaker labels
+
+Each transcript line gets an editable speaker label (e.g. "Speaker 1", "Speaker 2"), assigned automatically as you go by a **heuristic**: a background voice-activity detector (VAD) times actual silence gaps between utterances — a more reliable signal than an ASR engine's own (often fuzzy) result timestamps — and a new label is suggested whenever a genuine pause is detected. This runs for free, live, but it's a pause detector, not voice identification — it can't tell *who* is talking, only that someone paused.
+
+For real, voice-based identification, click **Identify speakers** (appears once you have a transcript) to run **speaker diarization**: a small on-device speech-embedding model (WeSpeaker ResNet34, ~7 MB) extracts a voice "fingerprint" for each detected utterance in the most recent recording/upload, and utterances with similar fingerprints are grouped into the same speaker via cosine-similarity clustering — entirely on-device, no download beyond the one-time model fetch. This replaces the heuristic labels with real ones based on voice similarity. It only covers the most recent recording or uploaded file; if your transcript spans multiple recordings, older segments from a different one keep their heuristic label. It also needs actual recorded audio — for **Live**, check **Also save an audio recording** first.
+
+Either way, rename any label and it updates every line sharing that name for the session — and always double-check who's who before sharing; no method here is perfect.
+
+#### Optional live audio recording
+
+On the **Live** tab, check **Also save an audio recording while captioning** to keep a downloadable audio file in parallel with live captions. The file is not uploaded or stored on this site — only offered as a download after you stop.
+
+The transcript follows new live captions automatically. If you scroll upward to review an earlier line, auto-follow pauses so your position is not lost; use **Jump to latest** to resume.
+
+#### Privacy
+
+| Path | Audio leaves device? |
+|------|---------------------|
+| Live (Web Speech) + on-device | No (when language pack installed) |
+| Live (Web Speech) + cloud fallback | Yes — processed by browser vendor (e.g. Google on Chrome) |
+| Live (LocalAI) / Record / Upload | No — Whisper inference runs locally after model download |
+
+- Cloud fallback for Web Speech live captions is **on by default** (most browsers lack the on-device pack out of the box) — uncheck **Allow cloud fallback** if you only want on-device recognition, accepting that captions won't start until the pack is installed.
+- The background VAD used for speaker timing always runs on-device, regardless of engine.
+- Transcript text (and speaker-label renames) are stored in IndexedDB on this device unless you check **Don't save transcript**.
+- Raw audio is not persisted in IndexedDB — optional **Download .webm** / **.mp3** after live or batch record.
+
+#### Browser requirements
+
+- **Live (Web Speech):** Chrome, Edge, or Safari (not Firefox) — use LocalAI there instead.
+- **Live (LocalAI) / Record / Upload:** any modern Chromium or Firefox browser with WebAssembly; WebGPU recommended for speed.
+- Microphone permission is requested only when you click Start.
+
+#### Limitations
+
+- Default speaker labels are a heuristic (pause-timing) aid; run **Identify speakers** for real voice-based labels, which are still approximate, not forensic-grade identification.
+- LocalAI captions appear per-utterance after a pause, not word-by-word.
+- Meeting minutes generation uses a local LLM draft — always review before sharing.
+
+#### Meeting minutes
+
+When enough transcript text is available, use **Generate minutes** to produce an editable draft (summary, decisions, action items) using a local model. This is AI-generated — verify before distributing.

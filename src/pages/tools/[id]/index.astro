@@ -10,6 +10,7 @@ import DiffTool from '@components/tools/DiffTool.svelte';
 import HashTool from '@components/tools/HashTool.svelte';
 import ImageCompressor from '@components/tools/ImageCompressor.svelte';
 import JsonTool from '@components/tools/JsonTool.svelte';
+import MeetingNotes from '@components/tools/MeetingNotes.svelte';
 import LocalAI from '@components/tools/LocalAI.svelte';
 import MediaConverter from '@components/tools/MediaConverter.svelte';
 import PdfPasswordTool from '@components/tools/PdfPasswordTool.svelte';
@@ -71,6 +72,14 @@ const BASE = import.meta.env.BASE_URL;
     <JsonTool client:load />
   ) : toolComponentKey === 'localai' ? (
     <LocalAI client:only="svelte" />
+  ) : toolComponentKey === 'meeting-notes' ? (
+    <MeetingNotes client:only="svelte">
+      <div class="card google-anno-skip">
+        <div class="card-body text-muted">
+          <i class="fas fa-spinner fa-spin me-2"></i>Loading Meeting Notes…
+        </div>
+      </div>
+    </MeetingNotes>
   ) : toolComponentKey === 'mediaconvert' ? (
     <MediaConverter client:load />
   ) : toolComponentKey === 'pdf' ? (

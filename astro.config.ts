@@ -5,6 +5,7 @@ import svelte from '@astrojs/svelte';
 import sitemap from '@astrojs/sitemap';
 import { fileURLToPath } from 'node:url';
 import linkValidator from 'astro-link-validator';
+import basicSsl from '@vitejs/plugin-basic-ssl';
 
 const SITE = 'https://ngtrphuong.github.io';
 
@@ -33,6 +34,9 @@ export default defineConfig({
   trailingSlash: 'ignore',
   output: 'static',
   integrations,
+  // Astro has its own top-level server.host/allowedHosts — separate from (and takes priority
+  // over) vite.server below. Both are set here for LAN/public-IP/FQDN dev access.
+  server: { host: true, allowedHosts: true },
   vite: {
     resolve: {
       alias: {
@@ -46,6 +50,17 @@ export default defineConfig({
         '@styles': fileURLToPath(new URL('./src/styles', import.meta.url)),
       },
     },
+    // Dev/preview only — self-signed HTTPS cert (@vitejs/plugin-basic-ssl is a no-op during
+    // `astro build`, it only patches the dev/preview server config). Mic/camera capture
+    // (getUserMedia/getDisplayMedia) requires a "secure context" — the browser only grants that
+    // for https:// or literally "localhost", never a bare LAN/public IP or a custom hostname over
+    // plain http://. Without this, navigator.mediaDevices is undefined entirely on any non-
+    // localhost origin, breaking Live/Record. `host: true` + `allowedHosts: true` let the dev
+    // server accept connections from any interface/hostname (LAN IP, FQDN) — appropriate for a
+    // local dev server on a trusted network, not something to carry into a real deployment.
+    plugins: [basicSsl()],
+    server: { host: true, allowedHosts: true },
+    preview: { host: true, allowedHosts: true },
   },
   markdown: {
     syntaxHighlight: 'shiki',
