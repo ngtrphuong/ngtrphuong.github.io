@@ -53,6 +53,40 @@ export type MinutesResult = {
   rawTranscript: TranscriptSegment[];
 };
 
+/**
+ * A speaker-active interval produced by the pyannote segmentation model for one 10 s window.
+ * `windowLocalSpeaker` is only meaningful within that window (the powerset head numbers up to
+ * 3 concurrent speakers locally) — cross-window identity comes later, from embedding clustering.
+ */
+export type RawDiarizationSegment = {
+  startMs: number;
+  endMs: number;
+  windowLocalSpeaker: number;
+  confidence: number;
+};
+
+/** A diarized interval with a session-stable speaker id (assigned by embedding clustering). */
+export type DiarizationSegment = {
+  startMs: number;
+  endMs: number;
+  speakerId: string;
+  confidence: number;
+};
+
+export type ClusteringOptions = {
+  /** Cosine similarity between cluster centroids above which two clusters merge. */
+  mergeThreshold: number;
+  /** Clusters with less total speech than this are absorbed into their nearest neighbor. */
+  minSpeakerDurationMs: number;
+  /** Segments shorter than this are merged into a neighbor instead of being embedded alone. */
+  minEmbeddingSegmentMs: number;
+  /** Optional "expected speakers" hint: stop merging once this many clusters remain. Advisory only. */
+  speakerCountHint?: number;
+};
+
+/** Which segmentation signal produced the current diarization result. */
+export type DiarizationEngine = 'pyannote' | 'vad-heuristic';
+
 export type WhisperPhase = 'idle' | 'loading' | 'ready' | 'transcribing' | 'error';
 export type LivePhase = 'idle' | 'listening' | 'error';
 export type RecordPhase = 'idle' | 'recording' | 'error';
