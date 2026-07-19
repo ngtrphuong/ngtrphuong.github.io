@@ -36,6 +36,17 @@ export const DIARIZATION_MODEL_ID = 'onnx-community/wespeaker-voxceleb-resnet34-
 /** Cosine similarity above which two utterances are clustered as the same speaker. Heuristic — retune if it over/under-splits in practice. */
 export const DIARIZATION_SIMILARITY_THRESHOLD = 0.55;
 
+/**
+ * Speaker-change/overlap-aware local segmentation (pyannote segmentation 3.0, MIT, ONNX ~5.7MB
+ * fp32) — verified to load and run via AutoProcessor/AutoModelForAudioFrameClassification +
+ * post_process_speaker_diarization in the installed @huggingface/transformers. Its powerset head
+ * distinguishes up to 3 concurrent speakers per 10 s window (including overlapped speech), which
+ * replaces VAD-pause timings as the segmentation signal for diarization. Revision pinned so a
+ * hub-side update can never silently change inference behavior.
+ */
+export const SEGMENTATION_MODEL_ID = 'onnx-community/pyannote-segmentation-3.0';
+export const SEGMENTATION_MODEL_REVISION = '733a93b6473d019a773298e08cefa686894b1854';
+
 export const ALLOWED_AUDIO_MIMES = new Set([
   'audio/webm',
   'audio/wav',

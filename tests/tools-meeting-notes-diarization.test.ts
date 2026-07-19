@@ -13,6 +13,12 @@ import {
   DEFAULT_CLUSTERING_OPTIONS,
   type EmbeddedSegment,
 } from '../src/scripts/tools/meeting-notes/clustering.ts';
+import {
+  planWindows,
+  powersetToRawSegments,
+  stitchWindows,
+} from '../src/scripts/tools/meeting-notes/segmentation-stitching.ts';
+import type { RawDiarizationSegment } from '../src/scripts/tools/meeting-notes/types.ts';
 
 const vec = (...v: number[]) => Float32Array.from(v);
 
@@ -139,4 +145,96 @@ test('DEFAULT_CLUSTERING_OPTIONS: sane defaults', () => {
   assert.equal(DEFAULT_CLUSTERING_OPTIONS.mergeThreshold, 0.55);
   assert.equal(DEFAULT_CLUSTERING_OPTIONS.minSpeakerDurationMs, 3000);
   assert.equal(DEFAULT_CLUSTERING_OPTIONS.minEmbeddingSegmentMs, 400);
+});
+
+// --- Window planning / powerset mapping / stitching (segmentation-stitching.ts) ---
+
+const SR = 16000;
+
+test('planWindows: 25 s of audio → three 10 s windows with 1 s overlap', () => {
+  const windows = planWindows(25 * SR, SR);
+  assert.deepEqual(windows, [
+    { startSample: 0, endSample: 10 * SR, offsetMs: 0 },
+    { startSample: 9 * SR, endSample: 19 * SR, offsetMs: 9000 },
+    { startSample: 18 * SR, endSample: 25 * SR, offsetMs: 18000 },
+  ]);
+});
+
+test('planWindows: audio shorter than one window → single unpadded window', () => {
+  assert.deepEqual(planWindows(5 * SR, SR), [{ startSample: 0, endSample: 5 * SR, offsetMs: 0 }]);
+});
+
+test('planWindows: empty audio → no windows', () => {
+  assert.deepEqual(planWindows(0, SR), []);
+});
+
+test('powersetToRawSegments: skips NO_SPEAKER, maps single classes, splits overlap classes', () => {
+  const raw = powersetToRawSegments(
+    [
+      { id: 0, start: 0, end: 1, confidence: 0.9 },
+      { id: 2, start: 1, end: 3, confidence: 0.8 },
+      { id: 4, start: 3, end: 4, confidence: 0.7 },
+    ],
+    0,
+    60_000,
+  );
+  assert.deepEqual(raw, [
+    { startMs: 1000, endMs: 3000, windowLocalSpeaker: 1, confidence: 0.8 },
+    { startMs: 3000, endMs: 4000, windowLocalSpeaker: 0, confidence: 0.7 },
+    { startMs: 3000, endMs: 4000, windowLocalSpeaker: 1, confidence: 0.7 },
+  ]);
+});
+
+test('powersetToRawSegments: shifts by window offset', () => {
+  const raw = powersetToRawSegments([{ id: 1, start: 2, end: 4, confidence: 0.9 }], 9000, 60_000);
+  assert.deepEqual(raw, [{ startMs: 11_000, endMs: 13_000, windowLocalSpeaker: 0, confidence: 0.9 }]);
+});
+
+test('powersetToRawSegments: truncates detections inside tail zero-padding', () => {
+  // True audio ends at 21.5 s; the padded final window can "detect" speech past that.
+  const raw = powersetToRawSegments(
+    [
+      { id: 1, start: 1, end: 5, confidence: 0.9 }, // 19–23 s → clamped at 21.5 s
+      { id: 2, start: 6, end: 8, confidence: 0.8 }, // 24–26 s → entirely padding, dropped
+    ],
+    18_000,
+    21_500,
+  );
+  assert.deepEqual(raw, [{ startMs: 19_000, endMs: 21_500, windowLocalSpeaker: 0, confidence: 0.9 }]);
+});
+
+test('stitchWindows: deduplicates overlap-region detections, preferring higher confidence', () => {
+  const w0: RawDiarizationSegment[] = [
+    { startMs: 2000, endMs: 5000, windowLocalSpeaker: 0, confidence: 0.9 },
+    { startMs: 8500, endMs: 9800, windowLocalSpeaker: 1, confidence: 0.6 },
+  ];
+  const w1: RawDiarizationSegment[] = [
+    { startMs: 8600, endMs: 9900, windowLocalSpeaker: 0, confidence: 0.8 }, // IoU ≈ 0.86 with w0's
+    { startMs: 12_000, endMs: 14_000, windowLocalSpeaker: 1, confidence: 0.7 },
+  ];
+  const stitched = stitchWindows([w0, w1]);
+  assert.deepEqual(stitched, [
+    { startMs: 2000, endMs: 5000, windowLocalSpeaker: 0, confidence: 0.9 },
+    { startMs: 8600, endMs: 9900, windowLocalSpeaker: 0, confidence: 0.8 },
+    { startMs: 12_000, endMs: 14_000, windowLocalSpeaker: 1, confidence: 0.7 },
+  ]);
+});
+
+test('stitchWindows: keeps lower-IoU neighbors as distinct segments', () => {
+  const stitched = stitchWindows([
+    [{ startMs: 8000, endMs: 9000, windowLocalSpeaker: 0, confidence: 0.9 }],
+    [{ startMs: 8800, endMs: 12_000, windowLocalSpeaker: 0, confidence: 0.9 }], // IoU 0.05
+  ]);
+  assert.equal(stitched.length, 2);
+});
+
+test('stitchWindows: output is time-sorted', () => {
+  const stitched = stitchWindows([
+    [{ startMs: 5000, endMs: 6000, windowLocalSpeaker: 1, confidence: 0.5 }],
+    [
+      { startMs: 12_000, endMs: 13_000, windowLocalSpeaker: 0, confidence: 0.5 },
+      { startMs: 9000, endMs: 9500, windowLocalSpeaker: 0, confidence: 0.5 },
+    ],
+  ]);
+  assert.deepEqual(stitched.map((s) => s.startMs), [5000, 9000, 12_000]);
 });
