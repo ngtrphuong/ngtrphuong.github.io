@@ -14,15 +14,24 @@ export const HINT_DISMISSED_KEY = 'meeting-notes-hint-dismissed';
 export const SPEAKER_TURN_GAP_MS = 1500;
 
 /**
- * @ricky0123/vad-web and its bundled onnxruntime-web default to loading worklet/model/WASM
- * assets relative to "./", which breaks under Vite (dev pre-bundling rewrites the dynamic
- * import path; the static build has no guarantee these files are copied alongside the JS).
- * Point both at jsdelivr instead — same "fetch WASM from a CDN at runtime" pattern already
- * used by the PDF tool's qpdf.wasm loading. Versions must match what's actually installed
- * (see package-lock.json — vad-web pins its own nested onnxruntime-web, independent of the
- * one @huggingface/transformers uses).
+ * VAD worklet + model assets are vendored (self-hosted) in public/tools/meeting-notes/vad/:
+ * - vad.worklet.bundle.min.js and silero_vad_legacy.onnx come from @ricky0123/vad-web@0.0.30's
+ *   dist and must be re-copied if that package is ever upgraded.
+ * - silero_vad_v5.onnx actually contains the **Silero VAD v6.2.1** graph
+ *   (github.com/snakers4/silero-vad tag v6.2.1, src/silero_vad/data/silero_vad.onnx,
+ *   SHA-256 1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3). vad-web 0.0.30
+ *   hardcodes the "silero_vad_v5.onnx" filename and only accepts model: "v5" | "legacy", but
+ *   v6 was verified I/O-compatible with its SileroV5 class (same input/state/sr inputs and
+ *   output/stateN outputs), so the v6 weights ship under the filename vad-web expects.
+ * Self-hosting (instead of the previous jsdelivr URLs) pins the files by inclusion and removes
+ * a runtime CDN dependency. onnxruntime-web's WASM stays on the CDN (large, version-pinned;
+ * must match vad-web's own nested onnxruntime-web version in package-lock.json).
  */
-export const VAD_BASE_ASSET_PATH = 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.30/dist/';
+const BASE_URL =
+  (typeof import.meta !== 'undefined'
+    ? (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL
+    : undefined) ?? '/';
+export const VAD_BASE_ASSET_PATH = `${BASE_URL.replace(/\/$/, '')}/tools/meeting-notes/vad/`;
 export const VAD_ONNX_WASM_BASE_PATH = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/';
 
 /**

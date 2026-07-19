@@ -552,8 +552,9 @@ test.describe('Meeting Notes tool', () => {
 
   test('diarization falls back to pause-based segmentation when the model fails to load', async ({ page, context }) => {
     // The mocked segment worker rejects its load; the pipeline must degrade to the VAD
-    // fallback (real silero VAD over the file — fetched from the pinned CDN, not an AI model
-    // download) and surface the fallback engine badge instead of erroring out.
+    // fallback (real silero VAD over the file — served from the site's own vendored
+    // /tools/meeting-notes/vad/ assets, not a model download) and surface the fallback
+    // engine badge instead of erroring out.
     test.setTimeout(90_000);
     await context.grantPermissions(['microphone']);
     await installDiarizationMocks(page, { segmentLoadFails: true });

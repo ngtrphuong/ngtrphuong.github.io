@@ -93,6 +93,9 @@ export async function startLiveSession(
 
     const micVad = await MicVAD.new({
       getStream: async () => stream,
+      // "v5" selects vad-web's SileroV5 model class — the vendored file it loads actually
+      // holds the I/O-compatible Silero v6 weights (see VAD_BASE_ASSET_PATH in constants).
+      model: 'v5',
       baseAssetPath: VAD_BASE_ASSET_PATH,
       onnxWASMBasePath: VAD_ONNX_WASM_BASE_PATH,
       onSpeechStart: () => {
