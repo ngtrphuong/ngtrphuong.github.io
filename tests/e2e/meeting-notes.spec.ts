@@ -73,9 +73,29 @@ test.describe('Meeting Notes tool', () => {
   });
 
   test('live mic Web Speech starts without an on-device language pack (cloud fallback)', async ({ page, context }) => {
-    // No fake SpeechRecognition here — exercises the real resolvePrivacyMode() fallback path
-    // against the actual browser API, on a fresh, un-primed profile.
+    // Keep CI deterministic: the mock intentionally omits the on-device static API, which
+    // exercises resolvePrivacyMode() falling back to cloud-assisted recognition.
     test.setTimeout(30_000);
+    await page.evaluate(() => {
+      class FakeSpeechRecognition {
+        continuous = false;
+        interimResults = false;
+        lang = '';
+        processLocally = false;
+        onresult: ((ev: unknown) => void) | null = null;
+        onerror: ((ev: unknown) => void) | null = null;
+        onend: (() => void) | null = null;
+        start() {}
+        stop() {}
+        abort() {}
+      }
+      const target = window as unknown as {
+        SpeechRecognition: typeof FakeSpeechRecognition;
+        webkitSpeechRecognition: typeof FakeSpeechRecognition;
+      };
+      target.SpeechRecognition = FakeSpeechRecognition;
+      target.webkitSpeechRecognition = FakeSpeechRecognition;
+    });
     await context.grantPermissions(['microphone']);
     await page.locator('#start-live-btn').click();
     await expect(page.locator('#stop-live-btn')).toBeVisible({ timeout: 10000 });
