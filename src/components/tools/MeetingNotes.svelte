@@ -30,7 +30,8 @@
   import { probeAudioDuration, decodeAudioBlob } from '@scripts/tools/meeting-notes/audio-decode.ts';
   import { NonRealTimeVAD } from '@ricky0123/vad-web';
   import { DiarizeBridge } from '@scripts/tools/meeting-notes/diarize-bridge.ts';
-  import { clusterSpeakers, reconcileWithTranscript, type SpeakerEmbedding } from '@scripts/tools/meeting-notes/diarization.ts';
+  import { SegmentationBridge } from '@scripts/tools/meeting-notes/segmentation.ts';
+  import { runDiarizationPipeline, type SpeechInterval } from '@scripts/tools/meeting-notes/diarization.ts';
   import {
     DEFAULT_LANG,
     HINT_DISMISSED_KEY,
@@ -58,6 +59,7 @@
   import { clearSession, loadSession, saveSession } from '@scripts/tools/meeting-notes/storage.ts';
   import type {
     ActiveTab,
+    DiarizationEngine,
     LiveAsrSession,
     LiveCaptionSource,
     LiveEngine,
@@ -137,9 +139,14 @@
   let speakerLabelOverrides: Record<string, string> = {};
 
   let diarizeBridge: DiarizeBridge | null = null;
+  let segmentationBridge: SegmentationBridge | null = null;
   let diarizationPhase: 'idle' | 'loading' | 'running' | 'ready' | 'error' = 'idle';
   let diarizationProgress = 0;
   let diarizationStatusText = '';
+  /** Which segmentation signal produced the last diarization run (null until a run completes). */
+  let diarizationEngine: DiarizationEngine | null = null;
+  /** Optional "expected speakers" hint — clamps clustering from over-merging. Empty = automatic. */
+  let expectedSpeakers: number | '' = '';
 
   let transcriptPanel: HTMLDivElement | null = null;
   let transcriptAutoFollow = true;
@@ -652,6 +659,7 @@
     speakerLabelOverrides = {};
     diarizationPhase = 'idle';
     diarizationStatusText = '';
+    diarizationEngine = null;
     await clearSession();
   }
 
@@ -732,11 +740,34 @@
     return diarizeBridge;
   }
 
+  function getSegmentationBridge(): SegmentationBridge {
+    if (!segmentationBridge) segmentationBridge = new SegmentationBridge();
+    return segmentationBridge;
+  }
+
+  async function detectSpeechWithVad(samples: Float32Array, sampleRate: number): Promise<SpeechInterval[]> {
+    // Must stay the legacy model: NonRealTimeVAD hardcodes the SileroLegacy input signature
+    // (separate h/c LSTM states) — the v5/v6 ONNX graphs are incompatible with it. Only the
+    // real-time MicVAD path supports `model: "v5"`.
+    const vad = await NonRealTimeVAD.new({
+      modelURL: `${VAD_BASE_ASSET_PATH}silero_vad_legacy.onnx`,
+      ortConfig: (ort) => {
+        (ort as unknown as { env: { wasm: { wasmPaths: string } } }).env.wasm.wasmPaths = VAD_ONNX_WASM_BASE_PATH;
+      },
+    });
+    const intervals: SpeechInterval[] = [];
+    for await (const { start, end } of vad.run(samples, sampleRate)) {
+      intervals.push({ startMs: start, endMs: end });
+    }
+    return intervals;
+  }
+
   /**
-   * Real, voice-based speaker diarization (WeSpeaker embeddings + cosine clustering) — a post-hoc
-   * pass over the most recent recording/upload, replacing the silence-gap heuristic's speakerId
-   * assignments. Only covers segments overlapping that one audio source; if the transcript spans
-   * multiple recordings/tabs, older segments from a different source are left untouched.
+   * Real, voice-based speaker diarization — a post-hoc pass over the most recent
+   * recording/upload: pyannote speaker-change segmentation (falling back to plain VAD pauses if
+   * that model can't load) → WeSpeaker voice embeddings → agglomerative clustering → transcript
+   * reconciliation. Only covers segments overlapping that one audio source; if the transcript
+   * spans multiple recordings/tabs, older segments from a different source are left untouched.
    */
   async function runDiarization() {
     if (!canDiarize || !diarizationSource) return;
@@ -744,7 +775,7 @@
 
     diarizationPhase = 'loading';
     diarizationProgress = 0;
-    diarizationStatusText = 'Loading diarization model…';
+    diarizationStatusText = 'Loading diarization models…';
     errorMessage = '';
 
     try {
@@ -756,34 +787,55 @@
         });
       }
 
+      // The segmentation model is an enhancement, not a requirement — if it can't load
+      // (offline before first download, init failure), the pipeline degrades to VAD pauses.
+      const segBridge = getSegmentationBridge();
+      if (!segBridge.isReady) {
+        try {
+          await segBridge.loadModel({ dirHandle: dirHandle ?? undefined }, (pct, status) => {
+            diarizationProgress = pct;
+            diarizationStatusText = status;
+          });
+        } catch {
+          /* pipeline falls back below */
+        }
+      }
+
       diarizationPhase = 'running';
       diarizationStatusText = 'Decoding audio…';
       const decoded = await decodeAudioBlob(source, source instanceof File ? source.name : undefined);
 
-      diarizationStatusText = 'Detecting speech segments…';
-      const vad = await NonRealTimeVAD.new({
-        modelURL: `${VAD_BASE_ASSET_PATH}silero_vad_legacy.onnx`,
-        ortConfig: (ort) => {
-          (ort as unknown as { env: { wasm: { wasmPaths: string } } }).env.wasm.wasmPaths = VAD_ONNX_WASM_BASE_PATH;
+      const hint = typeof expectedSpeakers === 'number' && expectedSpeakers >= 1
+        ? Math.floor(expectedSpeakers)
+        : undefined;
+
+      const result = await runDiarizationPipeline(
+        decoded.samples,
+        decoded.sampleRate,
+        segments,
+        {
+          segment: (audio) =>
+            segBridge.isReady
+              ? segBridge.segment(audio, (done, total) => {
+                  diarizationStatusText = `Detecting speaker changes… (${done}/${total})`;
+                })
+              : Promise.reject(new Error('Segmentation model unavailable')),
+          detectSpeech: (audio) => detectSpeechWithVad(audio, decoded.sampleRate),
+          embed: (audio) => bridge.embed(audio),
         },
-      });
+        { speakerCountHint: hint },
+        (status) => {
+          diarizationStatusText = status;
+        },
+      );
 
-      const embeddings: SpeakerEmbedding[] = [];
-      let count = 0;
-      for await (const { audio, start, end } of vad.run(decoded.samples, decoded.sampleRate)) {
-        count += 1;
-        diarizationStatusText = `Analyzing speakers… (utterance ${count})`;
-        const embedding = await bridge.embed(audio);
-        embeddings.push({ startMs: start, endMs: end, embedding });
-      }
-
-      const clustered = clusterSpeakers(embeddings);
-      segments = reconcileWithTranscript(segments, clustered);
+      segments = result.transcript;
+      diarizationEngine = result.engine;
       void persistIfEnabled();
 
       diarizationPhase = 'ready';
-      diarizationStatusText = embeddings.length
-        ? `Identified ${new Set(clustered.map((c) => c.speakerId)).size} speaker(s) across ${embeddings.length} utterance(s).`
+      diarizationStatusText = result.utteranceCount
+        ? `Identified ${result.speakerCount} speaker(s) across ${result.utteranceCount} utterance(s).`
         : 'No speech segments detected in the audio.';
     } catch (err: unknown) {
       errorMessage = err instanceof Error ? err.message : String(err);
@@ -825,6 +877,7 @@
     whisperBridge?.terminate();
     minutesWorker?.terminate();
     diarizeBridge?.terminate();
+    segmentationBridge?.terminate();
     revokeDownloadUrl();
     micStream?.getTracks().forEach((t) => t.stop());
   });
@@ -848,6 +901,10 @@
   }
   .speaker-label-input {
     max-width: min(14rem, 100%);
+  }
+  .expected-speakers-input {
+    width: 5.5rem;
+    flex: 0 0 auto;
   }
   .jump-latest-btn {
     position: absolute;
@@ -1331,11 +1388,24 @@
       <hr />
       <h6 class="fw-semibold">Speaker diarization</h6>
       <p class="text-muted small">
-        Identify who's speaking using real voice-embedding clustering (WeSpeaker) — more accurate than the automatic pause-based labels above. Runs on the most recent recording/upload only.
+        Identify who's speaking: a speaker-change model (pyannote segmentation) finds where voices switch — including overlapping speech — and voice-embedding clustering (WeSpeaker) groups them into speakers. More accurate than the automatic pause-based labels above. Runs on the most recent recording/upload only.
       </p>
-      <button type="button" class="btn btn-secondary btn-sm mb-2" id="diarize-btn" disabled={!canDiarize} on:click={runDiarization}>
-        {diarizationPhase === 'loading' || diarizationPhase === 'running' ? 'Identifying speakers…' : 'Identify speakers'}
-      </button>
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <button type="button" class="btn btn-secondary btn-sm" id="diarize-btn" disabled={!canDiarize} on:click={runDiarization}>
+          {diarizationPhase === 'loading' || diarizationPhase === 'running' ? 'Identifying speakers…' : 'Identify speakers'}
+        </button>
+        <label class="small text-muted mb-0" for="expected-speakers">Expected speakers</label>
+        <input
+          type="number"
+          class="form-control form-control-sm expected-speakers-input"
+          id="expected-speakers"
+          min="1"
+          max="10"
+          placeholder="auto"
+          bind:value={expectedSpeakers}
+          disabled={diarizationPhase === 'loading' || diarizationPhase === 'running'}
+        />
+      </div>
       {#if !diarizationSource}
         <p class="text-muted small mb-2">Needs a recording or uploaded file — check "Also save an audio recording" on Live, or use Record/Upload.</p>
       {/if}
@@ -1351,7 +1421,15 @@
         </div>
       {/if}
       {#if diarizationPhase === 'ready'}
-        <p class="text-success small mb-2"><i class="fas fa-check me-1"></i>{diarizationStatusText}</p>
+        <p class="text-success small mb-2">
+          <i class="fas fa-check me-1"></i>{diarizationStatusText}
+          {#if diarizationEngine === 'pyannote'}
+            <span class="badge text-bg-secondary ms-1" id="diarize-engine" title="Speaker changes detected by the pyannote segmentation model">Speaker-change model</span>
+          {:else if diarizationEngine === 'vad-heuristic'}
+            <span class="badge text-bg-warning ms-1" id="diarize-engine" title="Segmentation model unavailable — speech was split at pauses instead">Fallback: pause-based</span>
+          {/if}
+        </p>
+        <p class="text-muted small mb-2">Re-running re-clusters from scratch — review any renamed labels afterwards.</p>
       {/if}
     {/if}
 
