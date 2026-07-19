@@ -1,139 +1,269 @@
-# Architectural Specification: AI-Meeting-Notes
+# Meeting Notes — Implemented Architecture
 
-A 100% client-side, zero-cost, private-by-default meeting transcription and summary (Minutes of Meeting) tool designed to run completely inside the browser on GitHub Pages.
+Status: deployed at `/tools/meeting-notes/` on the Astro static site.
 
----
+The tool is browser-first and has no application backend. LocalAI transcription, speaker
+diarization, and meeting-minutes generation run in the browser. Web Speech can run on-device when
+the browser language pack is installed; its enabled-by-default cloud fallback may send live audio
+to the browser vendor and is disclosed in the UI.
 
-## 1. Core Technical Stack
+## 1. Runtime and integration
 
-To maintain compatibility with a static host (GitHub Pages) while targeting Vietnamese and English natively, the engine relies on WebAssembly (WASM) for audio intelligence and WebGPU for LLM reasoning.
+- **Host:** Astro 7 static SSG on GitHub Pages (`output: 'static'`).
+- **UI:** Svelte 5 client-only island, registered in `src/pages/tools/[id]/index.astro`.
+- **Main component:** `src/components/tools/MeetingNotes.svelte`.
+- **Local inference:** `@huggingface/transformers` using WebGPU when available and WASM fallback.
+- **Capture:** Web Media APIs (`getUserMedia`, `getDisplayMedia`, `MediaRecorder`, Web Audio).
+- **VAD:** `@ricky0123/vad-web`; the worklet and Silero models are self-hosted (vendored) under
+  `public/tools/meeting-notes/vad/`. The live path runs the Silero **v6.2.1** graph (shipped under
+  the `silero_vad_v5.onnx` filename vad-web hardcodes; verified I/O-compatible with its SileroV5
+  class — SHA-256 recorded in `constants.ts`). onnxruntime-web WASM still loads from a pinned CDN
+  URL matching the installed version.
+- **Persistence:** native IndexedDB for the current transcript session.
+- **Optional model cache:** browser cache by default or a user-selected directory through the File
+  System Access API.
 
-### 1.1 Audio Processing & Automatic Speech Recognition (ASR)
-*   **Engine:** `sherpa-onnx` compiled to WebAssembly (WASM).
-*   **Acoustic Model:** **SenseVoice** (by Alibaba, quantized to ONNX format).
-    *   *Why SenseVoice?* On the Hugging Face Open ASR Leaderboard, it significantly outperforms traditional Whisper variants in latency and throughput. It provides native multi-lingual support (optimized for Vietnamese and English) and handles streaming tasks gracefully on consumer-grade CPUs without freezing the browser thread.
-*   **Voice Activity Detection (VAD):** Integrated `Silero-VAD` via `sherpa-onnx` to isolate speech from background noise and dead air before feeding arrays into the ASR engine.
+No transcript, uploaded file, or recording is sent to this site because there is no server endpoint.
 
-### 1.2 LLM Reasoning (Minutes of Meeting - MoM Creation)
-*   **Engine:** `@mlc-ai/web-llm` utilizing **WebGPU** acceleration.
-*   **Model:** **Qwen2.5-7B-Instruct** (or `Llama-3-8B-Instruct` as fallback).
-    *   *Why Qwen2.5?* It offers exceptional multi-lingual context processing, yielding highly structured, localized Vietnamese summaries from mixed Eng/Vie transcripts compared to smaller English-centric models.
-
----
-
-## 2. Multi-Threaded Worker Architecture
-
-To prevent heavy AI models and streaming audio buffers from locking the browser's Main UI thread, the application operates via an asymmetric **Event-Driven Web Worker** structure.
+## 2. High-level architecture
 
 ```text
-       [ MAIN UI THREAD ]
-      /                  \
-(Raw PCM / Blobs)   (Finalized Transcripts)
-    /                      \
-   v                        v
-[ Audio Worker ]       [ LLM Worker ]
-(WASM: sherpa-onnx)    (WebGPU: WebLLM)
+                         Astro static page
+                                |
+                    MeetingNotes.svelte (UI)
+               _________/_______|_________\_________
+              /                 |                   \
+     Capture and live ASR   Local model workers   Browser storage
+     - mic/display/mixed    - Whisper ASR         - transcript in IDB
+     - Web Speech API       - diarization         - model cache
+     - MediaRecorder        - minutes LLM         - optional directory
+     - VAD timing
 ```
 
-### 2.1 The Main UI Thread
-*   Manages layout rendering (DOM changes).
-*   Initiates microphone permissions via `navigator.mediaDevices.getUserMedia`.
-*   Directs configuration choices (Spoken Language, Target MoM Language).
-*   Initializes recording pipelines and pipes input directly to specialized threads.
+The main thread owns permissions, stream lifecycle, reactive state, transcript editing, exports,
+and worker orchestration. Model loading and inference run in module workers so they do not block
+the Svelte UI.
 
-### 2.2 Audio Worker (`audio.worker.ts`)
-*   Instantiates the `sherpa-onnx` runtime environment.
-*   Maintains an internal state machine handling VAD segment framing and speaker clustering (Diarization).
-*   Receives raw `Float32Array` audio chunks, processes them via `OnlineRecognizer` or `OfflineRecognizer`, and posts back semantic JSON events (`onPartialTranscript`, `onFinalTranscript`).
+### Worker responsibilities
 
-### 2.3 LLM Worker (`llm.worker.ts`)
-*   Bootstraps the `@mlc-ai/web-llm` engine over WebGPU.
-*   Fetches and caches model weights inside the browser's local sandbox storage (`IndexedDB`).
-*   Receives aggregated meeting notes at the end of execution and streams Markdown tokens back to the UI thread via text-streaming hooks.
+| Worker | Responsibility |
+| --- | --- |
+| `components/tools/meeting-notes/worker.ts` | Whisper model loading and chunked ASR |
+| `components/tools/meeting-notes/segment-worker.ts` | pyannote speaker-change segmentation (windowed, overlap-aware) |
+| `components/tools/meeting-notes/diarize-worker.ts` | WeSpeaker embedding extraction |
+| `components/tools/meeting-notes/minutes-worker.ts` | Local Gemma model and streamed minutes generation |
 
----
+Bridges in `src/scripts/tools/meeting-notes/` validate worker events, expose typed APIs, normalize
+model progress, and terminate workers during component cleanup.
 
-## 3. Operational Modes Matrix
+## 3. ASR strategy
 
-The application must support three core structural workflows using unified contracts:
+The deployed design intentionally uses two interchangeable live engines instead of the originally
+proposed sherpa-onnx/SenseVoice stack.
 
-### 3.1 Live Mode (Real-Time Subtitling)
-1.  **Capture:** UI initializes the `AudioContext` and sets up an `AudioWorkletProcessor` or `ScriptProcessorNode` to slice real-time mic inputs into **250ms chunks**.
-2.  **Pipeline:** Chunks are continuously sent via `postMessage` to the Audio Worker. `sherpa-onnx` streams data into its internal buffers, performing immediate VAD segmentation and ASR.
-3.  **UI Feedback:** The worker fires back `onPartialTranscript` events instantly to give a responsive feedback loop, changing to `onFinalTranscript` once silence thresholds are met.
-4.  **Completion:** Stopping the pipeline triggers a transcript payload bundle dispatch into the LLM Worker for MoM composition.
+### 3.1 Web Speech API (default live engine)
 
-### 3.2 Record Mode (Background Capture)
-1.  **Capture:** Operates identically to *Live Mode* behind the scenes to balance computing load across the session.
-2.  **UI Feedback:** The UI thread intentionally decouples from rendering partial/final transcript events in the DOM. This protects low-end client machines from heavy GUI layout cycles during long calls.
-3.  **Completion:** Once the user completes the session, a single macro-render cycle populates the transcript interface while simultaneously triggering the local LLM.
+- Produces interim word-by-word captions without downloading a model.
+- Supports a primary BCP-47 language. Vietnamese is suitable for Vietnamese speech with occasional
+  English terms, but this is not true automatic bilingual detection.
+- Prefers local processing when Chrome/Edge exposes the on-device language-pack API.
+- Falls back to browser-vendor cloud recognition when the user leaves **Allow cloud fallback**
+  enabled. The current default is enabled so a fresh browser profile can start captions.
+- Treats silence (`no-speech`) and user aborts as non-fatal; fatal permission, network, and language
+  errors are surfaced in the UI.
+- For system/tab audio, uses track-based `SpeechRecognition.start(audioTrack)`, currently requiring
+  a supporting Chrome/Edge version (documented as 135+).
 
-### 3.3 Upload Mode (Batch File Processing)
-1.  **Capture:** User uploads a local multi-media asset (`.mp3`, `.wav`, `.m4a`).
-2.  **Decoding:** The UI reads the object array buffer and leverages the native browser API (`AudioContext.decodeAudioData()`) to decompress it into a monolithic, uncompressed mono channel `Float32Array`.
-3.  **Pipeline:** The entire float array goes straight into the Audio Worker. The worker instantiates an **`OfflineRecognizer` batch process**. It chunks the array dynamically, matches voiceprint similarities for speaker clusters, and executes high-speed batch text extractions.
+### 3.2 LocalAI (Whisper)
 
----
+- Uses `Xenova/whisper-base` by default, with `Xenova/whisper-tiny` as the smaller option.
+- Runs through Transformers.js in a Worker, using WebGPU when possible and WASM otherwise.
+- Decodes audio to mono 16 kHz PCM and transcribes in 30-second chunks.
+- Powers LocalAI live captions, Record transcription, and Upload transcription.
+- LocalAI live mode is VAD-gated and emits a finalized line after an utterance/pause rather than
+  Web Speech-style interim words.
 
-## 4. Unified Data Layer & TypeScript Interfaces
+Both live engines return the same `LiveAsrSession` contract (`stop` and `abort`) through
+`live-engine.ts`.
 
-Ensure Claude Code adheres to the following unified interfaces to keep the pipeline interchangeable:
+## 4. Capture and operational modes
+
+### 4.1 Audio sources
+
+Live and Record support:
+
+1. **Microphone:** `getUserMedia({ audio: true })`.
+2. **System / tab:** `getDisplayMedia({ video: true, audio: true })`; video keeps the display share
+   alive but only the audio track is recorded/transcribed.
+3. **Microphone + system:** Web Audio mixes microphone and display audio into a destination stream.
+
+The browser share dialog must include tab/system audio. Missing display audio is rejected with
+actionable guidance. Stopping share from the browser UI ends capture and releases all tracks and
+audio contexts.
+
+### 4.2 Live
+
+- Starts Web Speech or LocalAI against the selected source.
+- Runs VAD in parallel for speech-start/end timing and speaker-turn hints.
+- Can optionally record the same session with `MediaRecorder`.
+- Auto-scroll follows new text while the user is near the bottom. Manual upward scrolling pauses
+  follow mode and reveals **Jump to latest**.
+
+### 4.3 Record
+
+- Captures microphone, system/tab, or mixed audio with `MediaRecorder`.
+- Collects one-second encoded chunks and enforces a two-hour session limit.
+- On stop, decodes and transcribes the resulting Blob with Whisper.
+- The recording remains in memory for user-initiated download and optional diarization.
+
+### 4.4 Upload
+
+- Accepts an explicit audio/video MIME and extension allowlist with a 50 MiB cap.
+- Probes duration and decodes supported media to PCM in the browser.
+- Sends PCM to the Whisper Worker and streams finalized segments/progress to the UI.
+
+## 5. Speaker labels and diarization
+
+There are two distinct mechanisms:
+
+1. **Default turn heuristic (live):** VAD-derived pauses mark likely turn boundaries. A 1.5-second
+   gap is the fallback signal. This does not identify voices.
+2. **Optional voice diarization (post-hoc, "Identify speakers"):** a four-stage pipeline in
+   `diarization.ts`, all inference in workers:
+   1. **Segmentation:** `onnx-community/pyannote-segmentation-3.0` (pinned revision
+      `733a93b6…1854`, ~5.7 MB fp32 ONNX) runs over the raw recording/upload in 10-second windows
+      with 1-second overlap (`segment-worker.ts`). Its powerset head distinguishes up to three
+      concurrent speakers per window, including overlapped speech. Windows are stitched with
+      IoU > 0.5 overlap dedup (`segmentation-stitching.ts`). If this model cannot load, the
+      pipeline silently degrades to plain VAD speech intervals (the pre-v2 behavior) and the UI
+      badges the result as the fallback engine.
+   2. **Embeddings:** segments shorter than 400 ms are merged into a neighbor, then
+      `onnx-community/wespeaker-voxceleb-resnet34-LM` (~6.7 MB int8) produces a 256-dimensional
+      voice embedding per segment (`diarize-worker.ts`).
+   3. **Clustering:** agglomerative hierarchical clustering with centroid re-estimation
+      (`clustering.ts`): merge while centroid cosine similarity ≥ `0.55`, absorb clusters with
+      < 3 s of total speech, deterministic tie-breaking. An optional "Expected speakers" hint
+      stops merging early but never forces merges below the threshold.
+   4. **Reconciliation:** each transcript segment takes the speaker of its maximum-overlap
+      diarization segment; below 30 % coverage the existing label is left untouched.
+      `turnBoundary` is set where the assigned speaker changes.
+
+Diarization requires audio from the latest recording/upload; Live must have optional recording
+enabled. Labels remain editable, and renaming a label updates all matching segments. Re-running
+re-clusters from scratch, so renamed labels should be reviewed afterwards. Where two speakers
+overlap in time, the transcript line is assigned by maximum overlap only (no dual-speaker
+rendering yet — TODO).
+
+## 6. Meeting minutes
+
+- `minutes.ts` builds the prompt, checks transcript readiness, parses the model output, and exports
+  Markdown.
+- `minutes-worker.ts` loads `onnx-community/gemma-4-E2B-it-ONNX`.
+- Preferred execution is WebGPU with `q4f16`; WASM with `q4` is the fallback.
+- Generated tokens stream to the UI and are parsed into title, attendees, agenda, decisions,
+  action items, summary, and the source transcript.
+- Minutes are an editable AI-generated draft and are never treated as automatically verified.
+
+Minutes generation is user-triggered after enough finalized transcript text exists.
+
+## 7. Current data contracts
+
+The source of truth is `src/scripts/tools/meeting-notes/types.ts`.
 
 ```typescript
-export interface TranscriptSegment {
-  speakerId: string;    // e.g., "SPEAKER_01", "SPEAKER_02"
-  text: string;         // Segment transcription text
-  startTime: number;    // Absolute segment timestamp (seconds)
-  endTime: number;      // Absolute segment timestamp (seconds)
-}
+export type TranscriptSegment = {
+  id: string;
+  startMs: number;
+  endMs: number;
+  text: string;
+  speakerId?: string;
+  confidence?: number;
+  isFinal: boolean;
+  source: 'web-speech' | 'whisper';
+  turnBoundary?: boolean;
+};
 
-export interface OperationalConfig {
-  mode: 'LIVE' | 'RECORD' | 'UPLOAD';
-  spokenLanguage: 'vi' | 'en' | 'auto';
-  outputLanguage: 'vi' | 'en';
-  exportFormat: 'webm' | 'mp3';
-}
+export type PrivacyMode = 'on-device' | 'cloud-assisted' | 'local-model';
+export type LiveEngine = 'web-speech' | 'local-ai';
+export type ActiveTab = 'live' | 'record' | 'upload';
+export type LiveCaptionSource = 'mic' | 'system' | 'mixed' | 'meeting-audio';
 
-export interface IAudioEngine {
-  init(config: OperationalConfig): Promise<void>;
-  processStreamChunk(chunk: Float32Array): void;
-  processFullFile(buffer: Float32Array): Promise<TranscriptSegment[]>;
-  terminateSession(): Promise<TranscriptSegment[]>;
-}
+export type RawDiarizationSegment = {
+  startMs: number;
+  endMs: number;
+  windowLocalSpeaker: number; // local to one 10 s window; NOT globally stable
+  confidence: number;
+};
 
-export interface ILLMEngine {
-  initEngine(onProgress: (progress: number) => void): Promise<void>;
-  generateMinutes(
-    transcript: TranscriptSegment[],
-    targetLang: string,
-    onTokenStream: (token: string) => void
-  ): Promise<string>;
-}
+export type DiarizationSegment = {
+  startMs: number;
+  endMs: number;
+  speakerId: string; // session-stable, e.g. "Speaker 1"
+  confidence: number;
+};
+
+export type ClusteringOptions = {
+  mergeThreshold: number;        // cosine similarity, default 0.55
+  minSpeakerDurationMs: number;  // default 3000
+  minEmbeddingSegmentMs: number; // default 400
+  speakerCountHint?: number;     // advisory clamp only
+};
+
+export type DiarizationEngine = 'pyannote' | 'vad-heuristic';
+
+export type LiveAsrSession = {
+  stop: () => Promise<TranscriptSegment[]>;
+  abort: () => void;
+};
 ```
 
----
+`meeting-audio` is a compatibility alias normalized to `system`.
 
-## 5. Memory Management & Storage Strategy
+## 8. Storage and export
 
-### 5.1 Storage Optimization (Bypassing localStorage Constraints)
-*   **IndexedDB Default:** All runtime transcript structures, session tracking lists, and downloaded `WebLLM` model weights are stored in **IndexedDB** via a library wrapper like `idb` or `localForage`. This allows safe multi-gigabyte data limits governed flexibly by OS disk space allocations.
-*   **File System Access API Extension:** Integrate `window.showDirectoryPicker()`. If activated by the user, the application asks for explicit host directory file permissions, letting the UI directly create and modify individual localized `.json` files inside their desktop folder environment.
+- The current transcript, selected language, and speaker-label overrides are saved in
+  `meeting-notes-db/sessions/current` unless **Don't save transcript** is enabled.
+- Raw recording audio is not persisted in IndexedDB.
+- Transformers.js model files use browser cache or the user-selected directory through
+  `DirHandleCache`.
+- Transcript exports: plain text, Markdown, and JSON; copy uses text-safe browser APIs.
+- Audio exports: native recording container (normally WebM/Opus) or MP3. MP3 conversion is loaded
+  lazily through Mediabunny and `@mediabunny/mp3-encoder`.
+- Object URLs, streams, workers, VAD instances, and AudioContexts are released on stop/destroy.
 
-### 5.2 Dynamic Audio Multi-Plexing & Export Pipeline
-When recording begins in *Live* or *Record* modes, the raw microphone stream splits into two distinct processing vectors:
+## 9. Privacy and browser boundaries
 
-1.  **The AI Vector:** Supplies continuous float array data blocks directly into the Audio Worker for runtime processing.
-2.  **The Retention Vector:** Feeds raw streams into parallel encoders to support file downloads:
-    *   **`.webm` Export:** Pipes audio directly to the browser's native `MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })`. It requires negligible compute resources and aggregates safe binary chunks in the background.
-    *   **`.mp3` Export:** Because standard browser runtimes lack built-in native MP3 compression pipelines, the audio stream pipes directly into a separate `AudioEncoderWorker` compiled with `lamejs`. To guard against **Out of Memory (OOM)** browser tab crashes, the encoder handles data chunks on a **rolling interval (rolling every 5 seconds)**, converting raw PCM slices into compressed MP3 byte blocks instantly and appending them into IndexedDB file fragments on the fly.
+| Path | Audio leaves the device? |
+| --- | --- |
+| Web Speech with installed local language pack | No |
+| Web Speech with cloud fallback | Yes, to the browser vendor |
+| LocalAI live / Record / Upload | No; inference is local |
+| pyannote segmentation | No; inference is local |
+| VAD, diarization (embeddings/clustering), and minutes generation | No; inference is local |
 
----
+Microphone/display permissions are requested only from a user action. Transcript and user-provided
+labels are rendered as text, never injected as HTML. The tool does not log transcript or audio
+content to analytics.
 
-## 6. Prompting Guide for Claude Code Implementation
+Browser limitations:
 
-When instructing Claude Code to start writing code blocks for this project, you can pass these exact iterative tasks:
+- Web Speech availability and behavior vary by vendor.
+- Track-based system-audio recognition is not standardized across all browsers.
+- Screen/system audio choices depend on OS and browser share-dialog capabilities.
+- WebGPU improves local model speed but is optional because WASM fallback exists.
+- Speaker grouping and AI-generated minutes are approximate and require user review.
 
-1.  *"Set up a Vite project optimized for GitHub Pages deployment. Configure a Web Worker pooling strategy to import `sherpa-onnx` as a WASM asset and initialize its runtime asynchronously."*
-2.  *"Write the Audio Encoder Web Worker utilizing `lamejs` to accept raw PCM arrays streaming from a Media Audio node, encoding them in 5-second intervals to prevent UI allocation leaks."*
-3.  *"Implement a File System Access API service wrapper that falls back to IndexedDB if the user's browser fails modern file picker feature detection."*
-4.  *"Design the `WebLLM` integration using a customizable system context template that translates mixed Vietnamese/English conversation arrays into highly structured corporate meeting summaries."*
+## 10. Validation coverage
+
+- `tests/tools-meeting-notes.test.ts` covers formatters, minutes parsing, source labels, audio
+  export mapping, speech capability/error handling, speaker-turn logic, and Transformers progress
+  normalization.
+- `tests/tools-meeting-notes-diarization.test.ts` covers AHC clustering (determinism, centroid
+  vs single-linkage behavior, min-duration absorption, speaker-count hint), window
+  planning/stitching, powerset mapping, sliver merging, reconciliation, and the pipeline's
+  pyannote/fallback paths — all on synthetic fixtures, no models.
+- `tests/e2e/meeting-notes.spec.ts` covers hydration, privacy controls, engine/source selection,
+  mocked Web Speech paths, mixed Vietnamese/English system-audio captions, recording options,
+  responsive layout, transcript auto-follow behavior, and both diarization engines via mocked
+  segment/embedding workers (including the fallback badge and label renaming).
+- CI builds the static site and runs the frontend suite without downloading production AI models.

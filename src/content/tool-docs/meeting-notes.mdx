@@ -63,9 +63,14 @@ Most browsers don't have the pack pre-installed, so **Allow cloud fallback** is 
 
 Each transcript line gets an editable speaker label (e.g. "Speaker 1", "Speaker 2"), assigned automatically as you go by a **heuristic**: a background voice-activity detector (VAD) times actual silence gaps between utterances — a more reliable signal than an ASR engine's own (often fuzzy) result timestamps — and a new label is suggested whenever a genuine pause is detected. This runs for free, live, but it's a pause detector, not voice identification — it can't tell *who* is talking, only that someone paused.
 
-For real, voice-based identification, click **Identify speakers** (appears once you have a transcript) to run **speaker diarization**: a small on-device speech-embedding model (WeSpeaker ResNet34, ~7 MB) extracts a voice "fingerprint" for each detected utterance in the most recent recording/upload, and utterances with similar fingerprints are grouped into the same speaker via cosine-similarity clustering — entirely on-device, no download beyond the one-time model fetch. This replaces the heuristic labels with real ones based on voice similarity. It only covers the most recent recording or uploaded file; if your transcript spans multiple recordings, older segments from a different one keep their heuristic label. It also needs actual recorded audio — for **Live**, check **Also save an audio recording** first.
+For real, voice-based identification, click **Identify speakers** (appears once you have a transcript) to run **speaker diarization** — a two-model, fully on-device pipeline:
 
-Either way, rename any label and it updates every line sharing that name for the session — and always double-check who's who before sharing; no method here is perfect.
+1. A **speaker-change model** (pyannote segmentation, ~6 MB) scans the audio in 10-second windows and finds exactly where voices start, stop, and switch — including people talking over each other. If it can't load (e.g. offline before the first download), the tool automatically falls back to splitting at pauses instead, and the result is badged accordingly.
+2. A **voice-embedding model** (WeSpeaker ResNet34, ~7 MB) then extracts a voice "fingerprint" for each detected segment, and similar fingerprints are grouped into speakers by hierarchical clustering. If you know how many people were in the meeting, set **Expected speakers** to stop the grouping from over-merging similar voices; leave it blank for automatic.
+
+This replaces the heuristic labels with ones based on actual voice similarity. It only covers the most recent recording or uploaded file; if your transcript spans multiple recordings, older segments from a different one keep their heuristic label. It also needs actual recorded audio — for **Live**, check **Also save an audio recording** first.
+
+Either way, rename any label and it updates every line sharing that name for the session. Re-running **Identify speakers** re-groups voices from scratch, so review renamed labels afterwards — and always double-check who's who before sharing; no method here is perfect.
 
 #### Optional live audio recording
 
@@ -80,6 +85,7 @@ The transcript follows new live captions automatically. If you scroll upward to 
 | Live (Web Speech) + on-device | No (when language pack installed) |
 | Live (Web Speech) + cloud fallback | Yes — processed by browser vendor (e.g. Google on Chrome) |
 | Live (LocalAI) / Record / Upload | No — Whisper inference runs locally after model download |
+| Identify speakers (segmentation + voice embeddings) | No — both models run locally after a one-time download |
 
 - Cloud fallback for Web Speech live captions is **on by default** (most browsers lack the on-device pack out of the box) — uncheck **Allow cloud fallback** if you only want on-device recognition, accepting that captions won't start until the pack is installed.
 - The background VAD used for speaker timing always runs on-device, regardless of engine.
@@ -95,6 +101,7 @@ The transcript follows new live captions automatically. If you scroll upward to 
 #### Limitations
 
 - Default speaker labels are a heuristic (pause-timing) aid; run **Identify speakers** for real voice-based labels, which are still approximate, not forensic-grade identification.
+- Where two people speak at the same time, the overlapping line is attributed to whichever speaker covers more of it — overlapped speech is detected but not shown as two labels on one line.
 - LocalAI captions appear per-utterance after a pause, not word-by-word.
 - Meeting minutes generation uses a local LLM draft — always review before sharing.
 
