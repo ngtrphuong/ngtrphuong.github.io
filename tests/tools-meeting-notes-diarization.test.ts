@@ -18,7 +18,18 @@ import {
   powersetToRawSegments,
   stitchWindows,
 } from '../src/scripts/tools/meeting-notes/segmentation-stitching.ts';
-import type { RawDiarizationSegment } from '../src/scripts/tools/meeting-notes/types.ts';
+import {
+  mergeShortSegments,
+  reconcileWithTranscript,
+  runDiarizationPipeline,
+  MIN_RECONCILE_COVERAGE,
+  type DiarizationPipelineDeps,
+} from '../src/scripts/tools/meeting-notes/diarization.ts';
+import type {
+  DiarizationSegment,
+  RawDiarizationSegment,
+  TranscriptSegment,
+} from '../src/scripts/tools/meeting-notes/types.ts';
 
 const vec = (...v: number[]) => Float32Array.from(v);
 
@@ -237,4 +248,185 @@ test('stitchWindows: output is time-sorted', () => {
     ],
   ]);
   assert.deepEqual(stitched.map((s) => s.startMs), [5000, 9000, 12_000]);
+});
+
+// --- Sliver merging, reconciliation, and the full pipeline (diarization.ts) ---
+
+const rawSeg = (startMs: number, endMs: number, confidence = 1): RawDiarizationSegment => ({
+  startMs,
+  endMs,
+  windowLocalSpeaker: 0,
+  confidence,
+});
+
+const tSeg = (over: Partial<TranscriptSegment> & { id: string }): TranscriptSegment => ({
+  startMs: 0,
+  endMs: 1000,
+  text: 'hello',
+  isFinal: true,
+  source: 'whisper',
+  ...over,
+});
+
+test('mergeShortSegments: sliver merges into the preceding segment', () => {
+  const merged = mergeShortSegments([rawSeg(0, 2000), rawSeg(2100, 2300), rawSeg(5000, 8000)], 400);
+  assert.deepEqual(merged.map((s) => [s.startMs, s.endMs]), [[0, 2300], [5000, 8000]]);
+});
+
+test('mergeShortSegments: leading sliver attaches forward to the first long segment', () => {
+  const merged = mergeShortSegments([rawSeg(0, 200), rawSeg(1000, 4000)], 400);
+  assert.deepEqual(merged.map((s) => [s.startMs, s.endMs]), [[0, 4000]]);
+});
+
+test('mergeShortSegments: only slivers in input → kept as-is', () => {
+  const merged = mergeShortSegments([rawSeg(0, 200), rawSeg(500, 650)], 400);
+  assert.equal(merged.length, 2);
+});
+
+test('reconcileWithTranscript: assigns speaker by greatest overlap', () => {
+  const diarization: DiarizationSegment[] = [
+    { startMs: 0, endMs: 1200, speakerId: 'Speaker 1', confidence: 1 },
+    { startMs: 4900, endMs: 6100, speakerId: 'Speaker 2', confidence: 1 },
+  ];
+  const result = reconcileWithTranscript(
+    [tSeg({ id: 'a', startMs: 0, endMs: 1000, speakerId: 'old-guess' }), tSeg({ id: 'b', startMs: 5000, endMs: 6000 })],
+    diarization,
+  );
+  assert.equal(result[0].speakerId, 'Speaker 1');
+  assert.equal(result[1].speakerId, 'Speaker 2');
+});
+
+test('reconcileWithTranscript: below-coverage overlap leaves existing speakerId untouched', () => {
+  // 200 ms overlap on a 2000 ms segment = 10% coverage < 30% threshold.
+  const diarization: DiarizationSegment[] = [{ startMs: 0, endMs: 200, speakerId: 'Speaker 2', confidence: 1 }];
+  const result = reconcileWithTranscript(
+    [
+      tSeg({ id: 'kept', startMs: 0, endMs: 2000, speakerId: 'Speaker 9' }),
+      tSeg({ id: 'unset', startMs: 3000, endMs: 4000 }),
+    ],
+    diarization,
+  );
+  assert.equal(result[0].speakerId, 'Speaker 9');
+  assert.equal(result[1].speakerId, undefined);
+});
+
+test('reconcileWithTranscript: turnBoundary marks speaker transitions', () => {
+  const diarization: DiarizationSegment[] = [
+    { startMs: 0, endMs: 2000, speakerId: 'Speaker 1', confidence: 1 },
+    { startMs: 2000, endMs: 4000, speakerId: 'Speaker 2', confidence: 1 },
+  ];
+  const result = reconcileWithTranscript(
+    [
+      tSeg({ id: 'a', startMs: 0, endMs: 1000 }),
+      tSeg({ id: 'b', startMs: 1000, endMs: 2000 }),
+      tSeg({ id: 'c', startMs: 2200, endMs: 3200 }),
+    ],
+    diarization,
+  );
+  assert.deepEqual(result.map((r) => r.turnBoundary), [true, false, true]);
+});
+
+test('MIN_RECONCILE_COVERAGE is 30%', () => {
+  assert.equal(MIN_RECONCILE_COVERAGE, 0.3);
+});
+
+// Pipeline tests: two distinguishable "voices" injected via a mock embedder keyed on which
+// half of the (synthetic) audio the slice came from.
+const SAMPLE_RATE = 16_000;
+
+function makeDeps(over: Partial<DiarizationPipelineDeps> = {}): DiarizationPipelineDeps & {
+  calls: { segment: number; detectSpeech: number; embed: Float32Array[] };
+} {
+  const calls = { segment: 0, detectSpeech: 0, embed: [] as Float32Array[] };
+  return {
+    calls,
+    segment: async () => {
+      calls.segment += 1;
+      return [rawSeg(0, 2000, 0.9), rawSeg(3000, 5000, 0.8), rawSeg(6000, 8000, 0.85)];
+    },
+    detectSpeech: async () => {
+      calls.detectSpeech += 1;
+      return [
+        { startMs: 0, endMs: 2000 },
+        { startMs: 6000, endMs: 8000 },
+      ];
+    },
+    embed: async (slice: Float32Array) => {
+      calls.embed.push(slice);
+      // Voice A for slices whose first sample is 1, voice B for first sample 2.
+      return slice[0] === 1 ? Float32Array.from([1, 0]) : Float32Array.from([0, 1]);
+    },
+    ...over,
+  };
+}
+
+/** 10 s of audio where 0–2.5 s is "voice A" (value 1) and the rest "voice B" (value 2). */
+function makeSamples(): Float32Array {
+  const samples = new Float32Array(10 * SAMPLE_RATE);
+  samples.fill(1, 0, 2.5 * SAMPLE_RATE);
+  samples.fill(2, 2.5 * SAMPLE_RATE);
+  return samples;
+}
+
+test('runDiarizationPipeline: pyannote path clusters two voices and reconciles the transcript', async () => {
+  const deps = makeDeps();
+  const transcript = [
+    tSeg({ id: 'a', startMs: 100, endMs: 1900 }),
+    tSeg({ id: 'b', startMs: 3100, endMs: 4900 }),
+    tSeg({ id: 'c', startMs: 6100, endMs: 7900 }),
+  ];
+  const result = await runDiarizationPipeline(makeSamples(), SAMPLE_RATE, transcript, deps, {
+    minSpeakerDurationMs: 0,
+  });
+
+  assert.equal(result.engine, 'pyannote');
+  assert.equal(deps.calls.detectSpeech, 0);
+  assert.equal(result.speakerCount, 2);
+  assert.equal(result.utteranceCount, 3);
+  assert.equal(result.transcript[0].speakerId, 'Speaker 1');
+  assert.equal(result.transcript[1].speakerId, 'Speaker 2');
+  assert.equal(result.transcript[2].speakerId, 'Speaker 2');
+  // Embeds received the PCM slices matching each utterance's time range.
+  assert.equal(deps.calls.embed.length, 3);
+  assert.equal(deps.calls.embed[0].length, 2 * SAMPLE_RATE);
+});
+
+test('runDiarizationPipeline: falls back to VAD intervals when segmentation rejects', async () => {
+  const deps = makeDeps({
+    segment: async () => {
+      throw new Error('model failed to load');
+    },
+  });
+  const result = await runDiarizationPipeline(
+    makeSamples(),
+    SAMPLE_RATE,
+    [tSeg({ id: 'a', startMs: 100, endMs: 1900 })],
+    deps,
+    { minSpeakerDurationMs: 0 },
+  );
+  assert.equal(result.engine, 'vad-heuristic');
+  assert.equal(deps.calls.detectSpeech, 1);
+  assert.equal(result.speakerCount, 2);
+  assert.equal(result.transcript[0].speakerId, 'Speaker 1');
+});
+
+test('runDiarizationPipeline: no speech found → empty result, transcript unchanged', async () => {
+  const deps = makeDeps({ segment: async () => [] });
+  const transcript = [tSeg({ id: 'a', speakerId: 'Speaker 3' })];
+  const result = await runDiarizationPipeline(makeSamples(), SAMPLE_RATE, transcript, deps);
+  assert.equal(result.speakerCount, 0);
+  assert.equal(result.utteranceCount, 0);
+  assert.deepEqual(result.transcript, transcript);
+});
+
+test('runDiarizationPipeline: re-runs are deterministic (stable speaker ids for overrides)', async () => {
+  const transcript = [tSeg({ id: 'a', startMs: 100, endMs: 1900 })];
+  const first = await runDiarizationPipeline(makeSamples(), SAMPLE_RATE, transcript, makeDeps(), {
+    minSpeakerDurationMs: 0,
+  });
+  const second = await runDiarizationPipeline(makeSamples(), SAMPLE_RATE, transcript, makeDeps(), {
+    minSpeakerDurationMs: 0,
+  });
+  assert.deepEqual(first.diarization, second.diarization);
+  assert.deepEqual(first.transcript, second.transcript);
 });

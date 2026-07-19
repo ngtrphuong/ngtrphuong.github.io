@@ -26,7 +26,6 @@ import {
   type VadInterval,
 } from '../src/scripts/tools/meeting-notes/speaker-turns.ts';
 import { onDeviceLangStatusLabel, isBenignSpeechRecognitionError, isFatalSpeechErrorMessage } from '../src/scripts/tools/meeting-notes/asr-web-speech.ts';
-import { clusterSpeakers, reconcileWithTranscript } from '../src/scripts/tools/meeting-notes/diarization.ts';
 import type { TranscriptSegment } from '../src/scripts/tools/meeting-notes/types.ts';
 
 const seg = (over: Partial<TranscriptSegment>): TranscriptSegment => ({
@@ -208,60 +207,6 @@ test('supportsTrackBasedRecognition: uses Chromium major version, not start.leng
   );
   // In Node there is no navigator — helper should return null without throwing.
   assert.equal(chromiumMajorVersion(), null);
-});
-
-test('clusterSpeakers: near-identical embeddings are assigned the same speaker', () => {
-  const a = new Float32Array([1, 0, 0]);
-  const aAgain = new Float32Array([0.98, 0.02, 0]);
-  const result = clusterSpeakers([
-    { startMs: 0, endMs: 1000, embedding: a },
-    { startMs: 2000, endMs: 3000, embedding: aAgain },
-  ]);
-  assert.equal(result[0].speakerId, result[1].speakerId);
-});
-
-test('clusterSpeakers: orthogonal embeddings are assigned different speakers', () => {
-  const a = new Float32Array([1, 0, 0]);
-  const b = new Float32Array([0, 1, 0]);
-  const result = clusterSpeakers([
-    { startMs: 0, endMs: 1000, embedding: a },
-    { startMs: 2000, endMs: 3000, embedding: b },
-  ]);
-  assert.notEqual(result[0].speakerId, result[1].speakerId);
-});
-
-test('clusterSpeakers: three utterances, two speakers, correctly grouped', () => {
-  const a1 = new Float32Array([1, 0, 0]);
-  const b = new Float32Array([0, 1, 0]);
-  const a2 = new Float32Array([0.97, 0.03, 0]);
-  const result = clusterSpeakers([
-    { startMs: 0, endMs: 1000, embedding: a1 },
-    { startMs: 2000, endMs: 3000, embedding: b },
-    { startMs: 4000, endMs: 5000, embedding: a2 },
-  ]);
-  assert.equal(result[0].speakerId, result[2].speakerId);
-  assert.notEqual(result[0].speakerId, result[1].speakerId);
-});
-
-test('reconcileWithTranscript: assigns speakerId by greatest time overlap', () => {
-  const segments = [
-    seg({ id: 'a', startMs: 0, endMs: 1000, speakerId: 'heuristic-guess' }),
-    seg({ id: 'b', startMs: 5000, endMs: 6000 }),
-  ];
-  const clustered = [
-    { startMs: 0, endMs: 1200, speakerId: 'Speaker 1' },
-    { startMs: 4900, endMs: 6100, speakerId: 'Speaker 2' },
-  ];
-  const result = reconcileWithTranscript(segments, clustered);
-  assert.equal(result[0].speakerId, 'Speaker 1');
-  assert.equal(result[1].speakerId, 'Speaker 2');
-});
-
-test('reconcileWithTranscript: leaves speakerId untouched when no utterance overlaps', () => {
-  const segments = [seg({ id: 'a', startMs: 10000, endMs: 11000, speakerId: 'Speaker 1' })];
-  const clustered = [{ startMs: 0, endMs: 1000, speakerId: 'Speaker 2' }];
-  const result = reconcileWithTranscript(segments, clustered);
-  assert.equal(result[0].speakerId, 'Speaker 1');
 });
 
 test('parseTransformersProgress: handles fractional and percent values', () => {
