@@ -61,7 +61,7 @@ Most browsers don't have the pack pre-installed, so **Allow cloud fallback** is 
 
 #### Speaker labels
 
-Each transcript line gets an editable speaker label (e.g. "Speaker 1", "Speaker 2"), assigned automatically as you go by a **heuristic**: a background voice-activity detector (VAD) times actual silence gaps between utterances — a more reliable signal than an ASR engine's own (often fuzzy) result timestamps — and a new label is suggested whenever a genuine pause is detected. This runs for free, live, but it's a pause detector, not voice identification — it can't tell *who* is talking, only that someone paused.
+Each transcript line gets an editable speaker label (e.g. "Speaker 1", "Speaker 2"), assigned automatically as you go **by voice**: a background voice-activity detector (VAD) isolates each utterance, a small on-device voice-embedding model (WeSpeaker, ~7 MB, loaded quietly in the background when you start Live) computes its voice "fingerprint", and the fingerprint is matched against speakers heard so far — so when the same person speaks again, they get their **existing** label back instead of a new number. For the first seconds of a session (while the model loads) labels are provisional, based on pause timing, and are corrected in place as fingerprints arrive. If the model can't load (e.g. fully offline before the first download), labels stay pause-based for that session.
 
 For real, voice-based identification, click **Identify speakers** (appears once you have a transcript) to run **speaker diarization** — a two-model, fully on-device pipeline:
 

@@ -16,9 +16,12 @@ to the browser vendor and is disclosed in the UI.
 - **Capture:** Web Media APIs (`getUserMedia`, `getDisplayMedia`, `MediaRecorder`, Web Audio).
 - **VAD:** `@ricky0123/vad-web`; the worklet and Silero models are self-hosted (vendored) under
   `public/tools/meeting-notes/vad/`. The live path runs the Silero **v6.2.1** graph (shipped under
-  the `silero_vad_v5.onnx` filename vad-web hardcodes; verified I/O-compatible with its SileroV5
-  class — SHA-256 recorded in `constants.ts`). onnxruntime-web WASM still loads from a pinned CDN
-  URL matching the installed version.
+  the `silero_vad_v5.onnx` filename vad-web hardcodes — SHA-256 recorded in `constants.ts`).
+  v6 matches v5's tensor shapes but requires silero's official rolling-context input protocol
+  ([1, 576] = 64 context + 512 frame); fed vad-web's bare [1, 512] frames its probabilities
+  collapse and speech is never detected. `vad-v6-adapter.ts` restores the official protocol by
+  wrapping session creation through vad-web's `ortConfig` hook (no fork). onnxruntime-web WASM
+  still loads from a pinned CDN URL matching the installed version.
 - **Persistence:** native IndexedDB for the current transcript session.
 - **Optional model cache:** browser cache by default or a user-selected directory through the File
   System Access API.
@@ -126,8 +129,13 @@ audio contexts.
 
 There are two distinct mechanisms:
 
-1. **Default turn heuristic (live):** VAD-derived pauses mark likely turn boundaries. A 1.5-second
-   gap is the fallback signal. This does not identify voices.
+1. **Live voice labeling (`live-speaker-tracker.ts`):** each VAD-detected utterance's PCM is
+   embedded with WeSpeaker (model loads in the background when Live starts) and greedily assigned
+   to the nearest existing speaker centroid at the same ≈0.295 similarity threshold — so a
+   returning voice reuses its label instead of incrementing forever. Until the model is ready
+   (or if it can't load), a VAD-pause turn heuristic (1.5 s gap fallback) provides provisional
+   labels, which are patched in place once the utterance's embedding resolves. The pause
+   heuristic alone cannot identify voices and would only ever count upward.
 2. **Optional voice diarization (post-hoc, "Identify speakers"):** a four-stage pipeline in
    `diarization.ts`, all inference in workers:
    1. **Segmentation:** `onnx-community/pyannote-segmentation-3.0` (pinned revision

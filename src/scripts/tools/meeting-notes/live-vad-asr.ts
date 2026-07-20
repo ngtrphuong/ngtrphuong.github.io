@@ -1,5 +1,6 @@
 import { MicVAD } from '@ricky0123/vad-web';
 import { acquireDisplayStream, mixMicWithAudioTracks, SystemAudioNotCapturedError } from './audio-capture.ts';
+import { sileroV6OrtConfig } from './vad-v6-adapter.ts';
 import { VAD_BASE_ASSET_PATH, VAD_ONNX_WASM_BASE_PATH } from './constants.ts';
 import type { WhisperWorkerBridge } from './asr-whisper-bridge.ts';
 import type { LiveAsrSession, LiveCaptionSource, TranscriptSegment } from './types.ts';
@@ -15,6 +16,8 @@ export type LiveVadCallbacks = {
   onError: (message: string) => void;
   onSpeechStart: () => void;
   onSpeechEnd: () => void;
+  /** A VAD-detected utterance's 16 kHz PCM, for live voice-based speaker labeling (optional). */
+  onUtterance?: (intervalIndex: number, audio: Float32Array) => void;
 };
 
 type AcquiredStream = { stream: MediaStream; cleanup: () => void };
@@ -79,6 +82,7 @@ export async function startLiveSession(
   language: string,
 ): Promise<LiveAsrSession> {
   let stopped = false;
+  let utteranceIndex = 0;
   const finals: TranscriptSegment[] = [];
 
   const handleCaptureEnded = () => {
@@ -94,8 +98,10 @@ export async function startLiveSession(
     const micVad = await MicVAD.new({
       getStream: async () => stream,
       // "v5" selects vad-web's SileroV5 model class — the vendored file it loads actually
-      // holds the I/O-compatible Silero v6 weights (see VAD_BASE_ASSET_PATH in constants).
+      // holds the Silero v6 weights, driven through the official rolling-context protocol
+      // by sileroV6OrtConfig (see vad-v6-adapter.ts and VAD_BASE_ASSET_PATH in constants).
       model: 'v5',
+      ortConfig: sileroV6OrtConfig,
       baseAssetPath: VAD_BASE_ASSET_PATH,
       onnxWASMBasePath: VAD_ONNX_WASM_BASE_PATH,
       onSpeechStart: () => {
@@ -104,12 +110,17 @@ export async function startLiveSession(
       onSpeechEnd: async (audio) => {
         if (stopped) return;
         callbacks.onSpeechEnd();
+        const intervalIndex = utteranceIndex++;
+        // Must fire before transcribeSamples: the whisper bridge transfers the PCM's underlying
+        // ArrayBuffer to its worker, detaching `audio` (the diarize bridge copies before posting).
+        callbacks.onUtterance?.(intervalIndex, audio);
         try {
           await whisperBridge.transcribeSamples(audio, language, {
             onProgress: () => {},
             onSegment: (seg) => {
-              finals.push(seg);
-              callbacks.onFinal(seg);
+              const tagged = { ...seg, vadIntervalIndex: intervalIndex };
+              finals.push(tagged);
+              callbacks.onFinal(tagged);
             },
             onError: (msg) => callbacks.onError(msg),
           });

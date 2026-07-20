@@ -14,6 +14,7 @@
     type OnDeviceLangStatus,
   } from '@scripts/tools/meeting-notes/asr-web-speech.ts';
   import { suggestsNewTurn, defaultSpeakerLabel } from '@scripts/tools/meeting-notes/speaker-turns.ts';
+  import { LiveSpeakerTracker } from '@scripts/tools/meeting-notes/live-speaker-tracker.ts';
   import { WhisperWorkerBridge } from '@scripts/tools/meeting-notes/asr-whisper-bridge.ts';
   import { SessionRecorder } from '@scripts/tools/meeting-notes/audio-record.ts';
   import {
@@ -137,6 +138,14 @@
   let lastSegmentEndMs: number | null = null;
   let turnCount = 0;
   let speakerLabelOverrides: Record<string, string> = {};
+
+  // Live voice-based speaker labeling: WeSpeaker embeddings per VAD utterance, clustered online
+  // so a returning voice reuses its label instead of minting "Speaker N+1" on every pause.
+  let liveSpeakerTracker: LiveSpeakerTracker | null = null;
+  let liveDiarizeReady = false;
+  let liveDiarizeLoading = false;
+  let liveUtteranceQueue: { intervalIndex: number; audio: Float32Array }[] = [];
+  const LIVE_UTTERANCE_QUEUE_MAX = 24;
 
   let diarizeBridge: DiarizeBridge | null = null;
   let segmentationBridge: SegmentationBridge | null = null;
@@ -303,15 +312,82 @@
   }
 
   /**
-   * Prefers the engine's own VAD-timestamp-derived turnBoundary hint (see live-engine.ts) —
-   * accurate acoustic pause detection — falling back to the plain gap heuristic (speaker-turns.ts)
-   * when no such hint is available (Record/Upload's Whisper-only path). Heuristic either way —
-   * not a verified speaker identity.
+   * Voice-based when possible: if this segment's VAD utterance already has a WeSpeaker-embedding
+   * label (LiveSpeakerTracker), use it. Otherwise fall back to the turn heuristic (VAD pause
+   * hint, then plain gap) as a provisional label — it gets patched in place once the utterance's
+   * embedding resolves (see handleLiveUtterance). The heuristic alone cannot recognize a
+   * returning voice, so on its own it would only ever count upward.
    */
   function resolveSpeakerId(seg: TranscriptSegment): string {
+    if (seg.vadIntervalIndex != null) {
+      const voiceLabel = liveSpeakerTracker?.labelForInterval(seg.vadIntervalIndex);
+      if (voiceLabel) return voiceLabel;
+    }
     const isNewTurn = seg.turnBoundary ?? suggestsNewTurn(lastSegmentEndMs ?? undefined, seg.startMs);
     if (isNewTurn) turnCount += 1;
     return defaultSpeakerLabel(Math.max(0, turnCount - 1));
+  }
+
+  /** Starts loading the speaker-embedding model in the background for live labeling. */
+  function ensureLiveDiarization() {
+    liveSpeakerTracker ??= new LiveSpeakerTracker(
+      undefined,
+      new Set(segments.map((s) => s.speakerId).filter(Boolean)).size,
+    );
+    const bridge = getDiarizeBridge();
+    if (bridge.isReady) {
+      liveDiarizeReady = true;
+      return;
+    }
+    if (liveDiarizeLoading) return;
+    liveDiarizeLoading = true;
+    bridge
+      .loadModel({ dirHandle: dirHandle ?? undefined })
+      .then(() => {
+        liveDiarizeReady = true;
+        const queued = liveUtteranceQueue;
+        liveUtteranceQueue = [];
+        for (const { intervalIndex, audio } of queued) void embedAndAssign(intervalIndex, audio);
+      })
+      .catch(() => {
+        // Model unavailable (e.g. offline) — labels stay heuristic for this session.
+      })
+      .finally(() => {
+        liveDiarizeLoading = false;
+      });
+  }
+
+  function handleLiveUtterance(intervalIndex: number, audio: Float32Array) {
+    if (!liveSpeakerTracker) return;
+    if (liveDiarizeReady) {
+      void embedAndAssign(intervalIndex, audio);
+    } else {
+      // Copy: the LocalAI path transfers this buffer to the Whisper worker right after us.
+      liveUtteranceQueue.push({ intervalIndex, audio: audio.slice() });
+      if (liveUtteranceQueue.length > LIVE_UTTERANCE_QUEUE_MAX) liveUtteranceQueue.shift();
+    }
+  }
+
+  async function embedAndAssign(intervalIndex: number, audio: Float32Array) {
+    try {
+      const embedding = await getDiarizeBridge().embed(audio);
+      const tracker = liveSpeakerTracker;
+      if (!tracker) return;
+      const label = tracker.assign(intervalIndex, embedding);
+      // Correct any segments that were already rendered with a provisional heuristic label.
+      let changed = false;
+      const next = segments.map((s) => {
+        if (s.vadIntervalIndex !== intervalIndex || s.speakerId === label) return s;
+        changed = true;
+        return { ...s, speakerId: label };
+      });
+      if (changed) {
+        segments = next;
+        void persistIfEnabled();
+      }
+    } catch {
+      // Embedding is best-effort — the provisional label simply stays.
+    }
   }
 
   function renameSpeaker(speakerId: string | undefined, value: string) {
@@ -392,6 +468,7 @@
       onPrivacyMode: (mode: PrivacyMode) => updatePrivacyBadge(mode),
       onSpeechStart: () => { listeningForSpeech = true; },
       onSpeechEnd: () => { listeningForSpeech = false; },
+      onUtterance: handleLiveUtterance,
     };
   }
 
@@ -403,6 +480,11 @@
     revokeDownloadUrl();
     lastRecordingBlob = null;
     liveRecorder = null;
+    // Fresh tracker per session: VAD interval indexes restart at 0 each session, and the
+    // embedding model load kicks off in the background (labels are heuristic until it's ready).
+    liveSpeakerTracker = null;
+    liveUtteranceQueue = [];
+    ensureLiveDiarization();
 
     const source = normalizedLiveSource;
 
@@ -657,6 +739,8 @@
     lastSegmentEndMs = null;
     turnCount = 0;
     speakerLabelOverrides = {};
+    liveSpeakerTracker = null;
+    liveUtteranceQueue = [];
     diarizationPhase = 'idle';
     diarizationStatusText = '';
     diarizationEngine = null;

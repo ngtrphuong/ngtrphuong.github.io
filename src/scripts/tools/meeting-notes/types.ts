@@ -13,6 +13,12 @@ export type TranscriptSegment = {
    * own gap-based fallback heuristic (speaker-turns.ts). Still a heuristic, not real diarization.
    */
   turnBoundary?: boolean;
+  /**
+   * Which VAD-detected utterance this segment belongs to (per live session). Links the segment
+   * to that utterance's voice embedding so live speaker labels can be voice-based — and
+   * corrected in place once the embedding resolves (see LiveSpeakerTracker).
+   */
+  vadIntervalIndex?: number;
 };
 
 export type PrivacyMode = 'on-device' | 'cloud-assisted' | 'local-model';
@@ -30,6 +36,8 @@ export type LiveAsrCallbacks = {
    * Web Speech engine — timestamps used to mark speaker turns (see live-engine.ts). */
   onSpeechStart: () => void;
   onSpeechEnd: () => void;
+  /** A VAD-detected utterance's 16 kHz PCM, for live voice-based speaker labeling (optional). */
+  onUtterance?: (intervalIndex: number, audio: Float32Array) => void;
 };
 
 export type LiveAsrSession = {

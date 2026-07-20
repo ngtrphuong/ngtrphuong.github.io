@@ -55,11 +55,14 @@ export class VadTurnTracker {
     this.#openStartMs = atMs;
   }
 
-  speechEnd(atMs: number): void {
-    if (this.#openStartMs == null) return;
-    this.#intervals.push({ index: this.#nextIndex, startMs: this.#openStartMs, endMs: atMs });
+  /** Closes the open interval and returns its index (null if no interval was open). */
+  speechEnd(atMs: number): number | null {
+    if (this.#openStartMs == null) return null;
+    const index = this.#nextIndex;
+    this.#intervals.push({ index, startMs: this.#openStartMs, endMs: atMs });
     this.#nextIndex += 1;
     this.#openStartMs = null;
+    return index;
   }
 
   /** VAD flagged a speech start that turned out too short to count — discard it. */
@@ -67,9 +70,14 @@ export class VadTurnTracker {
     this.#openStartMs = null;
   }
 
+  /** The (nearest) VAD interval a timestamp belongs to, or null before any interval closed. */
+  intervalFor(atMs: number): number | null {
+    return intervalIndexForTimestamp(this.#intervals, atMs);
+  }
+
   /** Call once per final ASR segment. Returns true if it should be marked as a new speaker turn. */
   resolveTurnBoundary(segmentStartMs: number): boolean {
-    const idx = intervalIndexForTimestamp(this.#intervals, segmentStartMs);
+    const idx = this.intervalFor(segmentStartMs);
     if (idx === null) return this.#lastAssignedIndex === null;
     const isNew = idx !== this.#lastAssignedIndex;
     this.#lastAssignedIndex = idx;

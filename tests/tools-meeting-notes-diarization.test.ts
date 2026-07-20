@@ -25,6 +25,9 @@ import {
   MIN_RECONCILE_COVERAGE,
   type DiarizationPipelineDeps,
 } from '../src/scripts/tools/meeting-notes/diarization.ts';
+import { LiveSpeakerTracker } from '../src/scripts/tools/meeting-notes/live-speaker-tracker.ts';
+import { VadTurnTracker } from '../src/scripts/tools/meeting-notes/speaker-turns.ts';
+import { sileroV6OrtConfig } from '../src/scripts/tools/meeting-notes/vad-v6-adapter.ts';
 import type {
   DiarizationSegment,
   RawDiarizationSegment,
@@ -420,6 +423,142 @@ test('runDiarizationPipeline: no speech found → empty result, transcript uncha
   assert.equal(result.speakerCount, 0);
   assert.equal(result.utteranceCount, 0);
   assert.deepEqual(result.transcript, transcript);
+});
+
+// --- Live voice-based speaker labeling (live-speaker-tracker.ts) ---
+
+test('LiveSpeakerTracker: a returning voice reuses its label instead of minting a new one', () => {
+  const tracker = new LiveSpeakerTracker(0.3);
+  const voiceA = vec(1, 0);
+  const voiceB = vec(0, 1);
+  // A, A, B, A, B — the old pause heuristic would have produced 5 distinct speakers here.
+  assert.equal(tracker.assign(0, voiceA), 'Speaker 1');
+  assert.equal(tracker.assign(1, vec(0.95, 0.3122)), 'Speaker 1');
+  assert.equal(tracker.assign(2, voiceB), 'Speaker 2');
+  assert.equal(tracker.assign(3, voiceA), 'Speaker 1');
+  assert.equal(tracker.assign(4, vec(0.05, 1)), 'Speaker 2');
+  assert.equal(tracker.speakerCount, 2);
+});
+
+test('LiveSpeakerTracker: labelForInterval is null until the embedding resolves', () => {
+  const tracker = new LiveSpeakerTracker(0.3);
+  assert.equal(tracker.labelForInterval(0), null);
+  tracker.assign(0, vec(1, 0));
+  assert.equal(tracker.labelForInterval(0), 'Speaker 1');
+});
+
+test('LiveSpeakerTracker: labelOffset continues numbering after existing speakers', () => {
+  const tracker = new LiveSpeakerTracker(0.3, 2);
+  assert.equal(tracker.assign(0, vec(1, 0)), 'Speaker 3');
+  assert.equal(tracker.assign(1, vec(0, 1)), 'Speaker 4');
+});
+
+// --- Silero v6 rolling-context adapter (vad-v6-adapter.ts) ---
+
+type FakeTensor = { type: string; data: Float32Array; dims: number[] };
+
+function makeFakeOrt() {
+  const calls: Record<string, FakeTensor>[] = [];
+  class Tensor {
+    type: string;
+    data: Float32Array;
+    dims: number[];
+    constructor(type: string, data: Float32Array, dims: number[]) {
+      this.type = type;
+      this.data = data;
+      this.dims = dims;
+    }
+  }
+  const ort = {
+    Tensor,
+    InferenceSession: {
+      create: async () => ({
+        run: async (inputs: Record<string, FakeTensor>) => {
+          calls.push(inputs);
+          return { output: { data: [0.5] }, stateN: {} };
+        },
+      }),
+    },
+  };
+  return { ort, calls };
+}
+
+const tensor = (data: Float32Array, dims: number[]): FakeTensor => ({ type: 'float32', data, dims });
+const zeroState = () => tensor(new Float32Array(256), [2, 1, 128]);
+const liveState = () => {
+  const s = new Float32Array(256);
+  s[0] = 0.7;
+  return tensor(s, [2, 1, 128]);
+};
+
+test('sileroV6OrtConfig: extends [1,512] frames with a rolling 64-sample context', async () => {
+  const { ort, calls } = makeFakeOrt();
+  sileroV6OrtConfig(ort);
+  const session = (await ort.InferenceSession.create()) as {
+    run: (i: Record<string, FakeTensor>) => Promise<unknown>;
+  };
+
+  const frame1 = new Float32Array(512).fill(1);
+  await session.run({ input: tensor(frame1, [1, 512]), state: zeroState() });
+  assert.deepEqual(calls[0].input.dims, [1, 576]);
+  assert.equal(calls[0].input.data.length, 576);
+  // First frame: zero context prepended.
+  assert.ok(calls[0].input.data.subarray(0, 64).every((v) => v === 0));
+  assert.ok(calls[0].input.data.subarray(64).every((v) => v === 1));
+
+  // Second frame: context must be the previous frame's last 64 samples (all ones).
+  const frame2 = new Float32Array(512).fill(2);
+  await session.run({ input: tensor(frame2, [1, 512]), state: liveState() });
+  assert.ok(calls[1].input.data.subarray(0, 64).every((v) => v === 1));
+  assert.ok(calls[1].input.data.subarray(64).every((v) => v === 2));
+});
+
+test('sileroV6OrtConfig: an all-zero state resets the rolling context', async () => {
+  const { ort, calls } = makeFakeOrt();
+  sileroV6OrtConfig(ort);
+  const session = (await ort.InferenceSession.create()) as {
+    run: (i: Record<string, FakeTensor>) => Promise<unknown>;
+  };
+  await session.run({ input: tensor(new Float32Array(512).fill(3), [1, 512]), state: zeroState() });
+  // New stream: zero state again — context from frame 1 must NOT leak in.
+  await session.run({ input: tensor(new Float32Array(512).fill(4), [1, 512]), state: zeroState() });
+  assert.ok(calls[1].input.data.subarray(0, 64).every((v) => v === 0));
+});
+
+test('sileroV6OrtConfig: passes through non-silero run calls untouched', async () => {
+  const { ort, calls } = makeFakeOrt();
+  sileroV6OrtConfig(ort);
+  const session = (await ort.InferenceSession.create()) as {
+    run: (i: Record<string, FakeTensor>) => Promise<unknown>;
+  };
+  const odd = tensor(new Float32Array(100), [1, 100]);
+  await session.run({ input: odd, state: liveState() });
+  assert.equal(calls[0].input, odd);
+});
+
+test('sileroV6OrtConfig: applying twice does not double-wrap', async () => {
+  const { ort, calls } = makeFakeOrt();
+  sileroV6OrtConfig(ort);
+  sileroV6OrtConfig(ort);
+  const session = (await ort.InferenceSession.create()) as {
+    run: (i: Record<string, FakeTensor>) => Promise<unknown>;
+  };
+  await session.run({ input: tensor(new Float32Array(512), [1, 512]), state: zeroState() });
+  assert.deepEqual(calls[0].input.dims, [1, 576]); // 576, not 640
+});
+
+test('VadTurnTracker: speechEnd returns the closed interval index, intervalFor maps timestamps', () => {
+  const tracker = new VadTurnTracker();
+  tracker.speechStart(0);
+  assert.equal(tracker.speechEnd(1000), 0);
+  tracker.speechStart(3000);
+  assert.equal(tracker.speechEnd(4500), 1);
+  assert.equal(tracker.intervalFor(500), 0);
+  assert.equal(tracker.intervalFor(3600), 1);
+  // Unclosed/misfired speech produces no interval.
+  tracker.speechStart(6000);
+  tracker.misfire();
+  assert.equal(tracker.speechEnd(7000), null);
 });
 
 test('runDiarizationPipeline: re-runs are deterministic (stable speaker ids for overrides)', async () => {

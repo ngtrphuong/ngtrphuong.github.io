@@ -6,6 +6,7 @@ import {
 } from './asr-web-speech.ts';
 import { startLiveSession as startVadWhisperSession } from './live-vad-asr.ts';
 import { VadTurnTracker } from './speaker-turns.ts';
+import { sileroV6OrtConfig } from './vad-v6-adapter.ts';
 import { VAD_BASE_ASSET_PATH, VAD_ONNX_WASM_BASE_PATH } from './constants.ts';
 import type { WhisperWorkerBridge } from './asr-whisper-bridge.ts';
 import type { LiveAsrCallbacks, LiveAsrSession, LiveCaptionSource, LiveEngine } from './types.ts';
@@ -42,6 +43,7 @@ export async function startLiveEngine(
         onError: callbacks.onError,
         onSpeechStart: callbacks.onSpeechStart,
         onSpeechEnd: callbacks.onSpeechEnd,
+        onUtterance: callbacks.onUtterance,
       },
       whisperBridge,
       whisperLanguage,
@@ -70,7 +72,12 @@ async function startWebSpeechWithVadTiming(
   const wrappedCallbacks: LiveAsrCallbacks = {
     ...callbacks,
     onFinal: (seg) => {
-      callbacks.onFinal({ ...seg, turnBoundary: tracker.resolveTurnBoundary(seg.startMs) });
+      const vadIntervalIndex = tracker.intervalFor(seg.startMs) ?? undefined;
+      callbacks.onFinal({
+        ...seg,
+        turnBoundary: tracker.resolveTurnBoundary(seg.startMs),
+        vadIntervalIndex,
+      });
     },
   };
 
@@ -84,17 +91,21 @@ async function startWebSpeechWithVadTiming(
         vad = await MicVAD.new({
           getStream: async () => stream,
           // "v5" selects vad-web's SileroV5 model class — the vendored file it loads actually
-          // holds the I/O-compatible Silero v6 weights (see VAD_BASE_ASSET_PATH in constants).
+          // holds the Silero v6 weights, driven through the official rolling-context protocol
+          // by sileroV6OrtConfig (see vad-v6-adapter.ts and VAD_BASE_ASSET_PATH in constants).
           model: 'v5',
+          ortConfig: sileroV6OrtConfig,
           baseAssetPath: VAD_BASE_ASSET_PATH,
           onnxWASMBasePath: VAD_ONNX_WASM_BASE_PATH,
           onSpeechStart: () => {
             tracker.speechStart(Date.now() - sessionStartMs);
             callbacks.onSpeechStart();
           },
-          onSpeechEnd: () => {
-            tracker.speechEnd(Date.now() - sessionStartMs);
+          onSpeechEnd: (audio) => {
+            const intervalIndex = tracker.speechEnd(Date.now() - sessionStartMs);
             callbacks.onSpeechEnd();
+            // Hand the utterance PCM up for live voice-based speaker labeling.
+            if (intervalIndex != null) callbacks.onUtterance?.(intervalIndex, audio);
           },
           onVADMisfire: () => tracker.misfire(),
         });

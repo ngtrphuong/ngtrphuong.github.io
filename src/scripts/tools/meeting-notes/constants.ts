@@ -20,9 +20,12 @@ export const SPEAKER_TURN_GAP_MS = 1500;
  * - silero_vad_v5.onnx actually contains the **Silero VAD v6.2.1** graph
  *   (github.com/snakers4/silero-vad tag v6.2.1, src/silero_vad/data/silero_vad.onnx,
  *   SHA-256 1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3). vad-web 0.0.30
- *   hardcodes the "silero_vad_v5.onnx" filename and only accepts model: "v5" | "legacy", but
- *   v6 was verified I/O-compatible with its SileroV5 class (same input/state/sr inputs and
- *   output/stateN outputs), so the v6 weights ship under the filename vad-web expects.
+ *   hardcodes the "silero_vad_v5.onnx" filename and only accepts model: "v5" | "legacy", so the
+ *   v6 weights ship under the filename vad-web expects. IMPORTANT: the v6 graph matches the v5
+ *   input/output *shapes* but NOT vad-web's bare-frame feeding — it requires silero's official
+ *   rolling-64-sample-context protocol or its speech probabilities collapse (max ≈0.10 on clear
+ *   speech → VAD never fires). Every MicVAD call site MUST pass
+ *   `ortConfig: sileroV6OrtConfig` (vad-v6-adapter.ts), which restores that protocol.
  * Self-hosting (instead of the previous jsdelivr URLs) pins the files by inclusion and removes
  * a runtime CDN dependency. onnxruntime-web's WASM stays on the CDN (large, version-pinned;
  * must match vad-web's own nested onnxruntime-web version in package-lock.json).
