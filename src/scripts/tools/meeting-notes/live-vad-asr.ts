@@ -102,6 +102,9 @@ export async function startLiveSession(
       // by sileroV6OrtConfig (see vad-v6-adapter.ts and VAD_BASE_ASSET_PATH in constants).
       model: 'v5',
       ortConfig: sileroV6OrtConfig,
+      // Close utterances after 0.8 s of silence (default 1.4 s) — better per-speaker utterance
+      // granularity for live voice labeling, and snappier caption turnaround.
+      redemptionMs: 800,
       baseAssetPath: VAD_BASE_ASSET_PATH,
       onnxWASMBasePath: VAD_ONNX_WASM_BASE_PATH,
       onSpeechStart: () => {

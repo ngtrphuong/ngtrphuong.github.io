@@ -129,13 +129,15 @@ audio contexts.
 
 There are two distinct mechanisms:
 
-1. **Live voice labeling (`live-speaker-tracker.ts`):** each VAD-detected utterance's PCM is
-   embedded with WeSpeaker (model loads in the background when Live starts) and greedily assigned
-   to the nearest existing speaker centroid at the same ≈0.295 similarity threshold — so a
-   returning voice reuses its label instead of incrementing forever. Until the model is ready
-   (or if it can't load), a VAD-pause turn heuristic (1.5 s gap fallback) provides provisional
-   labels, which are patched in place once the utterance's embedding resolves. The pause
-   heuristic alone cannot identify voices and would only ever count upward.
+1. **Live voice labeling (`live-speaker-tracker.ts`):** each VAD-detected utterance's loudest
+   ~3 s is embedded with WeSpeaker (model loads in the background when Live starts) and the
+   accumulated set is re-clustered with the same knee-detecting AHC the batch pass uses — the
+   full interval → label map is re-applied after every utterance, so earlier lines are corrected
+   in place and labels converge to batch quality (verified: 8-speaker meeting → 8 stable,
+   correctly reused labels). Beyond ~120 utterances new arrivals attach greedily to the frozen
+   centroids (O(n³) cost control). Until the model is ready (or if it can't load), a VAD-pause
+   turn heuristic (1.5 s gap fallback) provides provisional labels. Live VAD closes utterances
+   after 0.8 s of silence (vad-web default 1.4 s) so natural turn gaps split per speaker.
 2. **Optional voice diarization (post-hoc, "Identify speakers"):** a four-stage pipeline in
    `diarization.ts`, all inference in workers:
    1. **Segmentation:** `onnx-community/pyannote-segmentation-3.0` (pinned revision
@@ -145,16 +147,21 @@ There are two distinct mechanisms:
       IoU > 0.5 overlap dedup (`segmentation-stitching.ts`). If this model cannot load, the
       pipeline silently degrades to plain VAD speech intervals (the pre-v2 behavior) and the UI
       badges the result as the fallback engine.
-   2. **Embeddings:** segments shorter than 400 ms are merged into a neighbor, then
-      `onnx-community/wespeaker-voxceleb-resnet34-LM` (~6.7 MB int8) produces a 256-dimensional
-      voice embedding per segment (`diarize-worker.ts`).
-   3. **Clustering:** agglomerative hierarchical clustering with centroid re-estimation
-      (`clustering.ts`): merge while centroid cosine similarity ≥ `≈0.295` (the reference
-      pyannote-3.1 pipeline's tuned threshold for this exact model pair — cosine distance
-      `0.7045654963945799`; the earlier `0.55` over-split real-world audio into one speaker per
-      utterance), absorb clusters with < 3 s of total speech, deterministic tie-breaking. An
-      optional "Expected speakers" hint stops merging early but never forces merges below the
-      threshold.
+   2. **Embeddings:** segments shorter than 1 s are merged into a neighbor (WeSpeaker is
+      unreliable below ~1 s), then `onnx-community/wespeaker-voxceleb-resnet34-LM` (~6.7 MB
+      int8) produces a 256-dimensional voice embedding from the loudest ~3 s of each segment
+      (`pickLoudestWindow` — real speech, not pad silence or turn-edge bleed; also keeps WASM
+      embedding faster than playback) (`diarize-worker.ts`).
+   3. **Clustering:** agglomerative hierarchical clustering with duration-weighted centroid
+      re-estimation (`clustering.ts`). The stopping point is the most conservative of: the
+      `≈0.295` similarity threshold (the reference pyannote-3.1 pipeline's tuned value for this
+      exact model pair — cosine distance `0.7045654963945799`; the earlier `0.55` over-split
+      real-world audio into one speaker per utterance), **knee detection** over the
+      merge-similarity sequence (same-voice merges score high and the first cross-voice merge
+      appears as a sharp drop — a fixed threshold alone under-splits noisy audio or over-merges
+      clean audio), and the optional "Expected speakers" hint. Clusters with < 3 s of total
+      speech are absorbed into their nearest neighbor (never below the hint). Verified on a
+      real 8-speaker fixture: 8/8 speakers, all recurring turns correctly re-identified.
    4. **Reconciliation:** each transcript segment takes the speaker of its maximum-overlap
       diarization segment; below 30 % coverage the existing label is left untouched.
       `turnBoundary` is set where the assigned speaker changes.

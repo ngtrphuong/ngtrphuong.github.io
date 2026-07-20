@@ -400,7 +400,11 @@ test.describe('Meeting Notes tool', () => {
   // injectable fake for @ricky0123/vad-web + the Whisper worker, and downloading the real
   // model in CI would be slow/flaky. Known coverage gap — verify manually in a real browser.
 
-  /** Minimal 16 kHz mono PCM16 WAV of a sine tone — content is irrelevant to the mocked models. */
+  /**
+   * Minimal 16 kHz mono PCM16 WAV of a sine tone. The first 3.5 s are quiet and the rest loud —
+   * the mocked embedding worker keys its two fake "voices" on slice amplitude, which survives
+   * the pipeline's loudest-3s window selection (slice length does not).
+   */
   function makeWavBuffer(seconds: number): Buffer {
     const sampleRate = 16000;
     const numSamples = Math.floor(seconds * sampleRate);
@@ -420,7 +424,8 @@ test.describe('Meeting Notes tool', () => {
     buf.write('data', 36);
     buf.writeUInt32LE(dataSize, 40);
     for (let i = 0; i < numSamples; i++) {
-      buf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 8000), 44 + i * 2);
+      const amp = i < 3.5 * sampleRate ? 4000 : 12000;
+      buf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / sampleRate) * amp), 44 + i * 2);
     }
     return buf;
   }
@@ -494,21 +499,26 @@ test.describe('Meeting Notes tool', () => {
               respond({ type: 'ready' });
             }
           } else if (msg?.type === 'segment') {
+            // Boundaries match the test WAV's quiet/loud halves (see makeWavBuffer).
             respond({
               type: 'segments',
               payload: {
                 requestId: msg.payload?.requestId,
                 segments: [
-                  { startMs: 0, endMs: 3000, windowLocalSpeaker: 0, confidence: 0.9 },
-                  { startMs: 3000, endMs: 8000, windowLocalSpeaker: 1, confidence: 0.9 },
+                  { startMs: 0, endMs: 3500, windowLocalSpeaker: 0, confidence: 0.9 },
+                  { startMs: 4000, endMs: 8000, windowLocalSpeaker: 1, confidence: 0.9 },
                 ],
               },
             });
           } else if (msg?.type === 'embed') {
-            const len = msg.payload?.audio?.length ?? 0;
+            // Fake "voices" keyed on slice amplitude: quiet half → voice A, loud half → voice B.
+            const audio = (msg.payload?.audio ?? []) as ArrayLike<number>;
+            let sum = 0;
+            for (let i = 0; i < audio.length; i++) sum += Math.abs(audio[i]);
+            const meanAmp = audio.length ? sum / audio.length : 0;
             respond({
               type: 'embedding',
-              payload: { requestId: msg.payload?.requestId, embedding: len < 60000 ? [1, 0] : [0, 1] },
+              payload: { requestId: msg.payload?.requestId, embedding: meanAmp < 0.15 ? [1, 0] : [0, 1] },
             });
           }
         },

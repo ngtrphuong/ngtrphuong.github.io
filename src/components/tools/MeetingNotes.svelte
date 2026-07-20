@@ -32,7 +32,7 @@
   import { NonRealTimeVAD } from '@ricky0123/vad-web';
   import { DiarizeBridge } from '@scripts/tools/meeting-notes/diarize-bridge.ts';
   import { SegmentationBridge } from '@scripts/tools/meeting-notes/segmentation.ts';
-  import { runDiarizationPipeline, type SpeechInterval } from '@scripts/tools/meeting-notes/diarization.ts';
+  import { runDiarizationPipeline, pickLoudestWindow, type SpeechInterval } from '@scripts/tools/meeting-notes/diarization.ts';
   import {
     DEFAULT_LANG,
     HINT_DISMISSED_KEY,
@@ -41,6 +41,7 @@
     VAD_ONNX_WASM_BASE_PATH,
     WHISPER_MODEL_DEFAULT,
     WHISPER_MODEL_OPTIONS,
+    WHISPER_SAMPLE_RATE,
     whisperLangFromBcp47,
   } from '@scripts/tools/meeting-notes/constants.ts';
   import {
@@ -370,14 +371,20 @@
 
   async function embedAndAssign(intervalIndex: number, audio: Float32Array) {
     try {
-      const embedding = await getDiarizeBridge().embed(audio);
+      const durationMs = (audio.length / WHISPER_SAMPLE_RATE) * 1000;
+      // Embed only the loudest ~3 s of the utterance — the actual speech, skipping VAD pre-pad
+      // silence and turn-edge bleed — which also keeps the WASM worker fast enough to stay
+      // real-time during a live meeting.
+      const embedding = await getDiarizeBridge().embed(pickLoudestWindow(audio, WHISPER_SAMPLE_RATE));
       const tracker = liveSpeakerTracker;
       if (!tracker) return;
-      const label = tracker.assign(intervalIndex, embedding);
-      // Correct any segments that were already rendered with a provisional heuristic label.
+      // Re-clustering may relabel earlier intervals too — re-apply the whole map so provisional
+      // labels AND previously voice-labeled lines are corrected in place.
+      const labelMap = tracker.add(intervalIndex, embedding, durationMs);
       let changed = false;
       const next = segments.map((s) => {
-        if (s.vadIntervalIndex !== intervalIndex || s.speakerId === label) return s;
+        const label = s.vadIntervalIndex != null ? labelMap.get(s.vadIntervalIndex) : undefined;
+        if (!label || s.speakerId === label) return s;
         changed = true;
         return { ...s, speakerId: label };
       });

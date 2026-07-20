@@ -95,6 +95,10 @@ async function startWebSpeechWithVadTiming(
           // by sileroV6OrtConfig (see vad-v6-adapter.ts and VAD_BASE_ASSET_PATH in constants).
           model: 'v5',
           ortConfig: sileroV6OrtConfig,
+          // Close utterances after 0.8 s of silence (default 1.4 s) — natural turn-taking gaps
+          // then reliably split utterances per speaker, which live voice labeling depends on
+          // (an utterance spanning two speakers gets one blended label).
+          redemptionMs: 800,
           baseAssetPath: VAD_BASE_ASSET_PATH,
           onnxWASMBasePath: VAD_ONNX_WASM_BASE_PATH,
           onSpeechStart: () => {

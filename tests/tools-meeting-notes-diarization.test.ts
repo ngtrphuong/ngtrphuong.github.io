@@ -161,7 +161,48 @@ test('DEFAULT_CLUSTERING_OPTIONS: sane defaults', () => {
   // Anything much stricter over-splits real-world audio into one speaker per utterance.
   assert.ok(Math.abs(DEFAULT_CLUSTERING_OPTIONS.mergeThreshold - 0.2954) < 0.001);
   assert.equal(DEFAULT_CLUSTERING_OPTIONS.minSpeakerDurationMs, 3000);
-  assert.equal(DEFAULT_CLUSTERING_OPTIONS.minEmbeddingSegmentMs, 400);
+  assert.equal(DEFAULT_CLUSTERING_OPTIONS.minEmbeddingSegmentMs, 1000);
+});
+
+test('clusterEmbeddings: speakerCountHint also floors the min-duration absorption pass', () => {
+  // Two clearly distinct voices, one of them brief — with a hint of 2, the short cluster must
+  // NOT be absorbed away (a quiet participant is still a participant).
+  const segs = [emb(0, LONG, vec(1, 0)), emb(LONG, LONG + 1500, vec(0, 1))];
+  const unhinted = clusterEmbeddings(segs);
+  assert.equal(new Set(unhinted.map((r) => r.speakerIndex)).size, 1);
+  const hinted = clusterEmbeddings(segs, { speakerCountHint: 2 });
+  assert.equal(new Set(hinted.map((r) => r.speakerIndex)).size, 2);
+});
+
+test('clusterEmbeddings: knee detection stops cross-voice merges the threshold would allow', () => {
+  // Two tight voice clusters whose cross-centroid similarity (~0.40) is above the default
+  // merge threshold (~0.295) — a pure threshold cut would merge everyone into one speaker.
+  // The sharp drop in the merge-similarity sequence (same-voice ≈0.95+ → cross ≈0.40) is a
+  // knee, and the cut must land there instead.
+  const result = clusterEmbeddings([
+    emb(0, LONG, vec(1, 0)),
+    emb(LONG, 2 * LONG, vec(0.995, 0.0998)),
+    emb(2 * LONG, 3 * LONG, vec(0.2, 0.9798)),
+    emb(3 * LONG, 4 * LONG, vec(0.25, 0.9682)),
+  ]);
+  assert.deepEqual(result.map((r) => r.speakerIndex), [0, 0, 1, 1]);
+});
+
+test('clusterEmbeddings: centroids are duration-weighted', () => {
+  // Voice A: one long utterance at (1,0) plus one short noisy sliver leaning toward B.
+  // With duration weighting the A centroid stays near (1,0), so a later pure-A utterance joins
+  // it; with unweighted averaging the sliver would drag the centroid toward B.
+  const a1 = emb(0, 10_000, vec(1, 0));
+  const noisy = emb(10_000, 10_400, vec(0.45, 0.893)); // 400 ms sliver, mostly "B"-like
+  const a2 = emb(20_000, 30_000, vec(0.995, 0.0998));
+  const b = emb(40_000, 50_000, vec(0, 1));
+  const result = clusterEmbeddings([a1, noisy, a2, b], {
+    mergeThreshold: 0.6,
+    minSpeakerDurationMs: 0,
+    minEmbeddingSegmentMs: 0,
+  });
+  assert.equal(result[0].speakerIndex, result[2].speakerIndex, 'pure A utterances stay together');
+  assert.notEqual(result[0].speakerIndex, result[3].speakerIndex, 'B stays separate');
 });
 
 // --- Window planning / powerset mapping / stitching (segmentation-stitching.ts) ---
@@ -429,28 +470,55 @@ test('runDiarizationPipeline: no speech found → empty result, transcript uncha
 
 test('LiveSpeakerTracker: a returning voice reuses its label instead of minting a new one', () => {
   const tracker = new LiveSpeakerTracker(0.3);
-  const voiceA = vec(1, 0);
-  const voiceB = vec(0, 1);
   // A, A, B, A, B — the old pause heuristic would have produced 5 distinct speakers here.
-  assert.equal(tracker.assign(0, voiceA), 'Speaker 1');
-  assert.equal(tracker.assign(1, vec(0.95, 0.3122)), 'Speaker 1');
-  assert.equal(tracker.assign(2, voiceB), 'Speaker 2');
-  assert.equal(tracker.assign(3, voiceA), 'Speaker 1');
-  assert.equal(tracker.assign(4, vec(0.05, 1)), 'Speaker 2');
+  tracker.add(0, vec(1, 0), 5000);
+  tracker.add(1, vec(0.95, 0.3122), 5000);
+  tracker.add(2, vec(0, 1), 5000);
+  tracker.add(3, vec(1, 0), 5000);
+  const map = tracker.add(4, vec(0.05, 1), 5000);
+  assert.equal(map.get(0), map.get(1));
+  assert.equal(map.get(0), map.get(3));
+  assert.equal(map.get(2), map.get(4));
+  assert.notEqual(map.get(0), map.get(2));
   assert.equal(tracker.speakerCount, 2);
+});
+
+test('LiveSpeakerTracker: re-clustering corrects an earlier label (map is re-applied)', () => {
+  // Two similar-ish voices: greedy first-come assignment could bind them together, but once
+  // enough utterances accumulate the knee re-cluster separates them — including interval 0.
+  const tracker = new LiveSpeakerTracker();
+  tracker.add(0, vec(1, 0), 5000);
+  tracker.add(1, vec(0.2, 0.9798), 5000); // sim to A ≈ 0.2 < threshold… distinct
+  tracker.add(2, vec(0.995, 0.0998), 5000);
+  const map = tracker.add(3, vec(0.25, 0.9682), 5000);
+  assert.equal(map.get(0), map.get(2));
+  assert.equal(map.get(1), map.get(3));
+  assert.notEqual(map.get(0), map.get(1));
 });
 
 test('LiveSpeakerTracker: labelForInterval is null until the embedding resolves', () => {
   const tracker = new LiveSpeakerTracker(0.3);
   assert.equal(tracker.labelForInterval(0), null);
-  tracker.assign(0, vec(1, 0));
+  tracker.add(0, vec(1, 0), 5000);
   assert.equal(tracker.labelForInterval(0), 'Speaker 1');
+});
+
+test('LiveSpeakerTracker: short utterances may join but never found a new speaker', () => {
+  const tracker = new LiveSpeakerTracker(0.3);
+  tracker.add(0, vec(1, 0), 5000);
+  // 500 ms utterance of a very different voice — attaches to the nearest existing speaker
+  // instead of founding "Speaker 2".
+  const map = tracker.add(1, vec(0, 1), 500);
+  assert.equal(map.get(1), 'Speaker 1');
+  assert.equal(tracker.speakerCount, 1);
 });
 
 test('LiveSpeakerTracker: labelOffset continues numbering after existing speakers', () => {
   const tracker = new LiveSpeakerTracker(0.3, 2);
-  assert.equal(tracker.assign(0, vec(1, 0)), 'Speaker 3');
-  assert.equal(tracker.assign(1, vec(0, 1)), 'Speaker 4');
+  const first = tracker.add(0, vec(1, 0), 5000);
+  assert.equal(first.get(0), 'Speaker 3');
+  const second = tracker.add(1, vec(0, 1), 5000);
+  assert.equal(second.get(1), 'Speaker 4');
 });
 
 // --- Silero v6 rolling-context adapter (vad-v6-adapter.ts) ---

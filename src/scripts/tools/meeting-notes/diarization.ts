@@ -11,6 +11,38 @@ import type {
 /** Below this share of a transcript segment covered by its best diarization match, no speaker is assigned. */
 export const MIN_RECONCILE_COVERAGE = 0.3;
 
+/** WeSpeaker works best on short windows; embedding more mostly adds cost (and WASM latency). */
+export const EMBED_WINDOW_SECONDS = 3;
+
+/**
+ * The highest-energy window of an utterance — the actual speech. Never the center or the edges:
+ * a VAD utterance can include pre-pad silence, a trailing redemption tail, or even span two
+ * turns with a silent gap in the middle (whose "center" embeds to garbage that bridges two
+ * speakers' clusters).
+ */
+export function pickLoudestWindow(
+  samples: Float32Array,
+  sampleRate: number,
+  windowSeconds = EMBED_WINDOW_SECONDS,
+): Float32Array {
+  const windowLen = Math.floor(windowSeconds * sampleRate);
+  if (samples.length <= windowLen) return samples;
+  const hop = Math.floor(sampleRate / 4);
+  // Prefix sums of energy for O(1) window sums.
+  const prefix = new Float64Array(samples.length + 1);
+  for (let i = 0; i < samples.length; i++) prefix[i + 1] = prefix[i] + samples[i] * samples[i];
+  let bestStart = 0;
+  let bestEnergy = -1;
+  for (let start = 0; start + windowLen <= samples.length; start += hop) {
+    const energy = prefix[start + windowLen] - prefix[start];
+    if (energy > bestEnergy) {
+      bestEnergy = energy;
+      bestStart = start;
+    }
+  }
+  return samples.subarray(bestStart, bestStart + windowLen);
+}
+
 export type SpeechInterval = { startMs: number; endMs: number };
 
 export type DiarizationPipelineDeps = {
@@ -154,7 +186,10 @@ export async function runDiarizationPipeline(
     const startIdx = Math.max(0, Math.floor((u.startMs / 1000) * sampleRate));
     const endIdx = Math.min(samples.length, Math.ceil((u.endMs / 1000) * sampleRate));
     if (endIdx <= startIdx) continue;
-    const embedding = await deps.embed(samples.subarray(startIdx, endIdx));
+    // Embed the loudest ~3 s (see pickLoudestWindow): best speech content, and on the browser's
+    // WASM backend embedding a full 10 s segment takes ~10 s — a long recording would otherwise
+    // take longer to diarize than to play.
+    const embedding = await deps.embed(pickLoudestWindow(samples.subarray(startIdx, endIdx), sampleRate));
     embedded.push({ startMs: u.startMs, endMs: u.endMs, embedding, confidence: u.confidence });
   }
   if (embedded.length === 0) {
