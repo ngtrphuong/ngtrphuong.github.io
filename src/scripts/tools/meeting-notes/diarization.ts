@@ -132,7 +132,17 @@ export async function runDiarizationPipeline(
     }));
   }
 
-  const utterances = mergeShortSegments(raw, opts.minEmbeddingSegmentMs);
+  // Overlap classes emit one segment per constituent speaker over the same time range — the
+  // audio slice (and therefore the embedding) would be identical, so embed each range once.
+  const seenRanges = new Set<string>();
+  const deduped = raw.filter((s) => {
+    const key = `${s.startMs}:${s.endMs}`;
+    if (seenRanges.has(key)) return false;
+    seenRanges.add(key);
+    return true;
+  });
+
+  const utterances = mergeShortSegments(deduped, opts.minEmbeddingSegmentMs);
   if (utterances.length === 0) {
     return { engine, diarization: [], transcript, speakerCount: 0, utteranceCount: 0 };
   }

@@ -42,8 +42,16 @@ export const VAD_ONNX_WASM_BASE_PATH = 'https://cdn.jsdelivr.net/npm/onnxruntime
  * labels — not the silence-gap heuristic used for the always-on default.
  */
 export const DIARIZATION_MODEL_ID = 'onnx-community/wespeaker-voxceleb-resnet34-LM';
-/** Cosine similarity above which two utterances are clustered as the same speaker. Heuristic — retune if it over/under-splits in practice. */
-export const DIARIZATION_SIMILARITY_THRESHOLD = 0.55;
+/**
+ * Cosine similarity above which two utterances are clustered as the same speaker.
+ * Taken from the reference pyannote/speaker-diarization-3.1 pipeline, which pairs exactly the
+ * same two models (pyannote segmentation-3.0 + wespeaker-voxceleb-resnet34-LM) and clusters with
+ * centroid-method AHC at cosine *distance* 0.7045654963945799 → similarity ≈ 0.2954.
+ * The previous 0.55 was far too strict for real-world audio: measured same-speaker similarity is
+ * only ~0.73 on *clean* speech, so any background music/noise pushed same-speaker pairs below
+ * 0.55 and every utterance became its own "speaker" (observed: 86 speakers in one broadcast).
+ */
+export const DIARIZATION_SIMILARITY_THRESHOLD = 1 - 0.7045654963945799;
 
 /**
  * Speaker-change/overlap-aware local segmentation (pyannote segmentation 3.0, MIT, ONNX ~5.7MB

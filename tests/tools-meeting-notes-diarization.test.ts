@@ -153,7 +153,10 @@ test('clusterEmbeddings: deterministic — identical input, identical output, in
 });
 
 test('DEFAULT_CLUSTERING_OPTIONS: sane defaults', () => {
-  assert.equal(DEFAULT_CLUSTERING_OPTIONS.mergeThreshold, 0.55);
+  // Matches the reference pyannote-3.1 pipeline's tuned AHC threshold for this exact
+  // segmentation+embedding model pair (cosine distance 0.7046 → similarity ≈ 0.2954).
+  // Anything much stricter over-splits real-world audio into one speaker per utterance.
+  assert.ok(Math.abs(DEFAULT_CLUSTERING_OPTIONS.mergeThreshold - 0.2954) < 0.001);
   assert.equal(DEFAULT_CLUSTERING_OPTIONS.minSpeakerDurationMs, 3000);
   assert.equal(DEFAULT_CLUSTERING_OPTIONS.minEmbeddingSegmentMs, 400);
 });

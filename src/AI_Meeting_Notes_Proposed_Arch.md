@@ -141,9 +141,12 @@ There are two distinct mechanisms:
       `onnx-community/wespeaker-voxceleb-resnet34-LM` (~6.7 MB int8) produces a 256-dimensional
       voice embedding per segment (`diarize-worker.ts`).
    3. **Clustering:** agglomerative hierarchical clustering with centroid re-estimation
-      (`clustering.ts`): merge while centroid cosine similarity ≥ `0.55`, absorb clusters with
-      < 3 s of total speech, deterministic tie-breaking. An optional "Expected speakers" hint
-      stops merging early but never forces merges below the threshold.
+      (`clustering.ts`): merge while centroid cosine similarity ≥ `≈0.295` (the reference
+      pyannote-3.1 pipeline's tuned threshold for this exact model pair — cosine distance
+      `0.7045654963945799`; the earlier `0.55` over-split real-world audio into one speaker per
+      utterance), absorb clusters with < 3 s of total speech, deterministic tie-breaking. An
+      optional "Expected speakers" hint stops merging early but never forces merges below the
+      threshold.
    4. **Reconciliation:** each transcript segment takes the speaker of its maximum-overlap
       diarization segment; below 30 % coverage the existing label is left untouched.
       `turnBoundary` is set where the assigned speaker changes.
