@@ -38,9 +38,10 @@ No transcript, uploaded file, or recording is sent to this site because there is
               /                 |                   \
      Capture and live ASR   Local model workers   Browser storage
      - mic/display/mixed    - Whisper ASR         - transcript in IDB
-     - Web Speech API       - diarization         - model cache
-     - MediaRecorder        - minutes LLM         - optional directory
-     - VAD timing
+     - Web Speech API       - pyannote segments   - model cache
+     - MediaRecorder        - WeSpeaker embeds    - optional directory
+     - VAD utterances       - minutes LLM
+     - live voice labels
 ```
 
 The main thread owns permissions, stream lifecycle, reactive state, transcript editing, exports,
@@ -199,6 +200,7 @@ export type TranscriptSegment = {
   isFinal: boolean;
   source: 'web-speech' | 'whisper';
   turnBoundary?: boolean;
+  vadIntervalIndex?: number; // links a live segment to its VAD utterance for voice labeling
 };
 
 export type PrivacyMode = 'on-device' | 'cloud-assisted' | 'local-model';
@@ -221,10 +223,10 @@ export type DiarizationSegment = {
 };
 
 export type ClusteringOptions = {
-  mergeThreshold: number;        // cosine similarity, default 0.55
+  mergeThreshold: number;        // cosine similarity, default ≈0.2954 (pyannote-3.1's tuned value)
   minSpeakerDurationMs: number;  // default 3000
-  minEmbeddingSegmentMs: number; // default 400
-  speakerCountHint?: number;     // advisory clamp only
+  minEmbeddingSegmentMs: number; // default 1000
+  speakerCountHint?: number;     // advisory clamp only — never forces merges below the threshold
 };
 
 export type DiarizationEngine = 'pyannote' | 'vad-heuristic';
@@ -277,9 +279,14 @@ Browser limitations:
   export mapping, speech capability/error handling, speaker-turn logic, and Transformers progress
   normalization.
 - `tests/tools-meeting-notes-diarization.test.ts` covers AHC clustering (determinism, centroid
-  vs single-linkage behavior, min-duration absorption, speaker-count hint), window
-  planning/stitching, powerset mapping, sliver merging, reconciliation, and the pipeline's
-  pyannote/fallback paths — all on synthetic fixtures, no models.
+  vs single-linkage behavior, duration weighting, knee detection, min-duration absorption,
+  speaker-count hint), window planning/stitching, powerset mapping, sliver merging,
+  reconciliation, the pipeline's pyannote/fallback paths, the live speaker tracker
+  (re-clustering, label reuse, short-utterance rules), and the Silero v6 context adapter — all
+  on synthetic fixtures, no models.
+- Both diarization paths were additionally validated outside CI against ground truth: a real
+  two-speaker fixture and a synthetic 8-speaker meeting assembled from real LibriSpeech voices
+  (batch and live both resolve 8/8 speakers with every recurring turn correctly re-identified).
 - `tests/e2e/meeting-notes.spec.ts` covers hydration, privacy controls, engine/source selection,
   mocked Web Speech paths, mixed Vietnamese/English system-audio captions, recording options,
   responsive layout, transcript auto-follow behavior, and both diarization engines via mocked
